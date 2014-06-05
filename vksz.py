@@ -11,23 +11,40 @@ cosmo = fidcosmo
 
 def main( hemi='south'):
     grid = grid3d(hemi=hemi)
-    d_data = load_sdss_data_both_catalogs(hemi)
-    n_data = grid.num_from_radecz(d_data['ra'],d_data['dec'], d_data['z'])
-    d_rand = load_sdss_randoms_both_catalogs(hemi)
-    n_rand = grid.num_from_radecz(d_rand['ra'],d_rand['dec'], d_rand['z'])
+    n_data = num_sdss_data_both_catalogs(hemi)
+    n_rand = num_sdss_randoms_both_catalogs(hemi)
     n_rand *= (1.*n_data.sum()/n_rand.sum())
+    delta, weight = num_to_delta(n_data, n_rand, fwhm_sm=2)
+    ipdb.set_trace()
+
+    
+def num_sdss_data_both_catalogs(hemi):    
+    d_data = load_sdss_data_both_catalogs(hemi)
+    return grid.num_from_radecz(d_data['ra'],d_data['dec'], d_data['z'])
+
+def num_sdss_random_both_catalogs(hemi):    
+    d_random = load_sdss_random_both_catalogs(hemi)
+    return grid.num_from_radecz(d_random['ra'],d_random['dec'], d_random['z'])
+
+
+
+
+def num_to_delta(n_data, n_rand, fwhm_sm=2, delta_max=3.):
     from scipy.ndimage import gaussian_filter
-    fwhm_sm = 2.
     sigma_sm = fwhm_sm/2.355
-    # tmpp, replace with a wiener filter that knows about LSS and shot noise.
-    n_data = gaussian_filter(n_data, sigma_sm)
+    # smooth randoms
     n_rand = gaussian_filter(n_rand, sigma_sm)
+
+    # smooth data
+    # tmpp, replace with a filter that knows about LSS and shot noise.
+    n_data = gaussian_filter(n_data, sigma_sm)
+
     delta = (n_data-n_rand)/n_rand
     delta[n_rand==0]=0.
-    delta_max = 3.
     delta[delta>delta_max]=delta_max
-    pl.clf(); pl.imshow(delta[:,:,140])
-    ipdb.set_trace()
+    weight = n_rand/np.max(n_rand)
+    return delta, weight
+
     
 
 class grid3d(object):
