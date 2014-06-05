@@ -9,44 +9,48 @@ import cPickle as pickle
 from cosmolopy import distance, fidcosmo
 cosmo = fidcosmo
 
-def main():
-    hemi='south'
+def main( hemi='south'):
     grid = grid3d(hemi=hemi)
+    d_data = load_sdss_data_both_catalogs(hemi)
+    n_data = grid.num_from_radecz(d_data['ra'],d_data['dec'], d_data['z'])
     d_rand = load_sdss_randoms_both_catalogs(hemi)
-    nrandom = grid.num_from_radecz(d_rand['ra'],d_rand['dec'], d_rand['z'])
+    n_rand = grid.num_from_radecz(d_rand['ra'],d_rand['dec'], d_rand['z'])
+    n_rand *= (1.*n_data.sum()/n_rand.sum())
+    from scipy.ndimage import gaussian_filter
+    fwhm_sm = 2.
+    sigma_sm = fwhm_sm/2.355
+    # tmpp, replace with a wiener filter that knows about LSS and shot noise.
+    n_data = gaussian_filter(n_data, sigma_sm)
+    n_rand = gaussian_filter(n_rand, sigma_sm)
+    delta = (n_data-n_rand)/n_rand
+    delta[n_rand==0]=0.
+    delta_max = 3.
+    delta[delta>delta_max]=delta_max
+    pl.clf(); pl.imshow(delta[:,:,140])
     ipdb.set_trace()
     
 
 class grid3d(object):
-    def __init__(self, hemi='south', reso_mpc=8.0, 
-                 nx=2**9, ny=2**9, nz=2**9, 
+    def __init__(self, hemi='south', reso_mpc=16.0, 
+                 nx=2**8, ny=2**8, nz=2**8, 
                  zmin=0.1, zmax=0.55):
         self.hemi = hemi
         self.reso_mpc = reso_mpc
         self.zmin = zmin
         self.zmax = zmax
-        hemic = hemi.capitalize()
-        lowz = fits.open(datadir+'galaxy_DR10v8_LOWZ_'+hemic+'.fits')[1].data
-        cmass = fits.open(datadir+'galaxy_DR10v8_CMASS_'+hemic+'.fits')[1].data        
-        ra = np.concatenate([lowz['ra'], cmass['ra']])
-        dec = np.concatenate([lowz['dec'], cmass['dec']])
-        z = np.concatenate([lowz['z'], cmass['z']])        
+        self.nx=nx
+        self.ny=ny
+        self.nz=nz
+        d = load_sdss_data_both_catalogs(hemi)
+        ra = d['ra']; dec=d['dec']; z=d['z']
         wh = np.where((z>self.zmin)&(z<self.zmax))[0]
         ra=ra[wh]; dec=dec[wh]; z=z[wh]
-
-        # do zmin/zmax in data loader functions?
-        # insert here.#tmpp
-        # CAREFUL, as digitize returns [0] for too-small values.
-        
         rr = interp_comoving_distance(z)
         th = (90.-dec)*np.pi/180.
         phi = ra*np.pi/180.
         xx = rr*np.sin(th)*np.cos(phi)
         yy = rr*np.sin(th)*np.sin(phi)
         zz = rr*np.cos(th)
-        self.nx=nx
-        self.ny=ny
-        self.nz=nz
         x1d = np.arange(nx)*reso_mpc
         y1d = np.arange(ny)*reso_mpc
         z1d = np.arange(nz)*reso_mpc
@@ -60,14 +64,14 @@ class grid3d(object):
 
 
     def get_voxel_indices(self, x, y, z):
-        ind_x = np.digitize(x, x1d)
-        ind_y = np.digitize(y, y1d)
-        ind_z = np.digitize(z, z1d)
+        ind_x = np.digitize(x, self.x1d)
+        ind_y = np.digitize(y, self.y1d)
+        ind_z = np.digitize(z, self.z1d)
         return ind_x, ind_y, ind_z
         
     def num_from_xyz(self, x, y, z):
         n = np.zeros((self.nx, self.ny, self.nz))
-        ind_x, ind_y, ind_z = get_voxel_indices(self, x, y, z)
+        ind_x, ind_y, ind_z = self.get_voxel_indices(x, y, z)
         for xtmp,ytmp,ztmp in zip(ind_x, ind_y, ind_z):
             n[xtmp, ytmp, ztmp] += 1.        
         return n
@@ -81,7 +85,7 @@ class grid3d(object):
         xx = rr*np.sin(th)*np.cos(phi)
         yy = rr*np.sin(th)*np.sin(phi)
         zz = rr*np.cos(th)        
-        n = num_from_xyz(xx, yy, zz)
+        n = self.num_from_xyz(xx, yy, zz)
         return n
 
 
