@@ -6,21 +6,29 @@ datadir = 'data/'
 from astropy.io import fits
 import cPickle as pickle
 #import healpy as hp
-from cosmolopy import distance, fidcosmo
-cosmo = fidcosmo
+from cosmolopy import distance, fidcosmo, constants
+cosmo = fidcosmo #probably want to put in Planck cosmology at some point.
+mpc2km = constants.Mpc_km
 
-def main( hemi='south'):
+def main(hemi='south'):
+    vlos = vlos_for_hemi(hemi)
+    pl.clf(); pl.imshow(vlos[:,:,128]*mpc2km,vmin=-200,vmax=200)
+    pl.colorbar()
+    pl.title(hemi)
+    ipdb.set_trace()
+    
+
+def vlos_for_hemi(hemi):
     grid = grid3d(hemi=hemi)
     n_data = num_sdss_data_both_catalogs(hemi, grid)
     n_rand = num_sdss_rand_both_catalogs(hemi, grid)
     n_rand *= (1.*n_data.sum()/n_rand.sum())
     delta, weight = num_to_delta(n_data, n_rand, fwhm_sm=2)
-    vels = delta_to_raw_vels(delta, weight, grid)
+    vels = delta_to_vels(delta, weight, grid)
     vlos = vels_to_vel_los_from_observer(vels, grid)
-    ipdb.set_trace()
-
+    return vlos
     
-def delta_to_raw_vels(delta, weight, grid):
+def delta_to_vels(delta, weight, grid):
     from numpy.fft import fftn, ifftn
     vels = np.zeros((3, delta.shape[0], delta.shape[1], delta.shape[2]))
     ks = get_wavenumbers(delta.shape, grid.reso_mpc)
@@ -29,9 +37,16 @@ def delta_to_raw_vels(delta, weight, grid):
     ii = np.complex(0,1)
     for i in range(3):
         vels[i,:, :, :] = np.real(ifftn(ii*fftn(delta*weight, axes=[i]) * ks[i] / kmag2, axes=[i]))
+
+    # calculate the z-dependent factor, which will put these velocities into Mpc/s.
+    zgrid3d = grid.redshift_grid()
+    z_dep_fac = interp_z_dependent_velocity_factors(zgrid3d)
+    for i in range(3): vels[i, :, :] *= z_dep_fac
     return vels
 
+    
 def vels_to_vel_los_from_observer(vels, grid):
+    '''
     shape = vels.shape[1:]
     ones = np.ones(shape)
     x0, y0, z0 = grid.get_voxel_indices([0.], [0.], [0.])
@@ -39,14 +54,14 @@ def vels_to_vel_los_from_observer(vels, grid):
     yy = np.arange(shape[1])[np.newaxis,:,np.newaxis]*ones    
     zz = np.arange(shape[2])[np.newaxis,np.newaxis,:]*ones        
     dd = np.array([xx-x0[0], yy-y0[0], zz-z0[0]])
+    '''
+    dd = grid.vec_from_observer()
     mag = np.sqrt((dd**2.).sum(0))
     inv_mag = 1./mag
     inv_mag[mag==0]=0.
     for i in range(3): dd[i,:,:,:] *= inv_mag
     vel_los_from_observer = (dd*vels).sum(0)
     return vel_los_from_observer
-
-
 
     
 def get_wavenumbers(shape, reso_mpc):
@@ -70,13 +85,12 @@ def num_sdss_data_both_catalogs(hemi, grid):
     d_data = load_sdss_data_both_catalogs(hemi)
     return grid.num_from_radecz(d_data['ra'],d_data['dec'], d_data['z'])
 
+    
 def num_sdss_rand_both_catalogs(hemi, grid):    
     d_rand = load_sdss_rand_both_catalogs(hemi)
     return grid.num_from_radecz(d_rand['ra'],d_rand['dec'], d_rand['z'])
 
-
-
-
+    
 def num_to_delta(n_data, n_rand, fwhm_sm=2, delta_max=3.):
     from scipy.ndimage import gaussian_filter
     sigma_sm = fwhm_sm/2.355
@@ -94,7 +108,6 @@ def num_to_delta(n_data, n_rand, fwhm_sm=2, delta_max=3.):
     return delta, weight
 
     
-
 class grid3d(object):
     def __init__(self, hemi='south', reso_mpc=16.0, 
                  nx=2**8, ny=2**8, nz=2**8, 
@@ -153,19 +166,28 @@ class grid3d(object):
         n = self.num_from_xyz(xx, yy, zz)
         return n
 
-    def vec_to_observer(self):
+    def vec_from_observer(self):
         shape = (self.nx, self.ny, self.nz)
         ones = np.ones(shape)
         x0, y0, z0 = self.get_voxel_indices([0.], [0.], [0.])
         xx = np.arange(shape[0])[:,np.newaxis,np.newaxis]*ones
         yy = np.arange(shape[1])[np.newaxis,:,np.newaxis]*ones
         zz = np.arange(shape[2])[np.newaxis,np.newaxis,:]*ones
-        return np.array([xx-x0[0], yy-y0[0], zz-z0[0]])
+        return np.array([xx-x0[0], yy-y0[0], zz-z0[0]])*self.reso_mpc
 
 
-    def distance_to_observer(self):
-        rtmp = self.vec_to_observer()
+    def distance_from_observer(self):
+        rtmp = self.vec_from_observer()
         return np.sqrt((rtmp**2.).sum(0))
+
+
+    def redshift_grid(self):
+        d = self.distance_from_observer()
+        zgrid = np.arange(0,2,1e-3)
+        dgrid = distance.comoving_distance(zgrid, **cosmo)
+        from scipy import interpolate
+        f = interpolate.interp1d(dgrid, zgrid)
+        return f(d)
         
 
 
@@ -181,62 +203,18 @@ def interp_comoving_distance(z, deltaz=1e-3):
     return f(z)
 
 
-def grid(hemisphere='south', zmin=0.1, zmax=0.55):
-    lowz = fits.open(datadir+'galaxy_DR10v8_LOWZ_'+hemisphere.capitalize()+'.fits')[1].data
-    cmass = fits.open(datadir+'galaxy_DR10v8_CMASS_'+hemisphere.capitalize()+'.fits')[1].data
-    ra = np.concatenate([lowz['ra'], cmass['ra']])
-    dec = np.concatenate([lowz['dec'], cmass['dec']])
-    z = np.concatenate([lowz['z'], cmass['z']])
-    wh = np.where((z>zmin)&(z<zmax))[0]
-    ra=ra[wh]; dec=dec[wh]; z=z[wh]
-    from cosmolopy import distance, fidcosmo
-    print '...calculating distance...'
-    rr = distance.comoving_distance(z, **fidcosmo)
-    th = (90.-dec)*np.pi/180.
-    phi = ra*np.pi/180.
-    xx = rr*np.sin(th)*np.cos(phi)
-    yy = rr*np.sin(th)*np.sin(phi)
-    zz = rr*np.cos(th)
-
-    reso_mpc = 8.0
-    nx = 2**9
-    ny = 2**9
-    nz = 2**9
-
-    x1d = np.arange(nx)*reso_mpc
-    y1d = np.arange(ny)*reso_mpc
-    z1d = np.arange(nz)*reso_mpc
-    for thing in [x1d, y1d, z1d]: thing -= np.mean(thing)
-    x1d += xx.mean()
-    y1d += yy.mean()
-    z1d += zz.mean()
-
-    ind_x = np.digitize(xx, x1d)
-    ind_y = np.digitize(yy, y1d)
-    ind_z = np.digitize(zz, z1d)
-    n = np.zeros((nx,ny,nz))
-    for xtmp,ytmp,ztmp in zip(ind_x, ind_y, ind_z):
-        n[xtmp, ytmp, ztmp] += 1.
-
-    pl.clf()
-    for i in range(3):
-        pl.subplot(1,3,i+1)
-        pl.imshow(n.sum(i))
-        if i==0: pl.title('%s, %.1f Mpc resolution'%(hemisphere,reso_mpc))
-
-
-    for thing in [xx,yy,zz]:
-        print thing.min(), thing.max(), thing.max()-thing.min(), np.log2((thing.max()-thing.min())/reso_mpc)
-
-
-    ipdb.set_trace()
-
-
+def interp_z_dependent_velocity_factors(z, deltaz=1e-3):
+    from cosmolopy.perturbation import fgrowth
+    zgrid = np.arange(np.min(z)-deltaz, np.max(z)+deltaz, deltaz)
+    hz_grid = distance.hubble_z(zgrid, **cosmo)
+    fgrowth_grid = fgrowth(zgrid, cosmo['omega_M_0'])
+    a_grid = 1./(1.+zgrid)
+    tmp_grid = fgrowth_grid*a_grid*hz_grid
+    from scipy import interpolate
+    f = interpolate.interp1d(zgrid, tmp_grid)
+    return f(z)
     
     
-
-
-
 def download_redmapper():
     from urllib import urlretrieve
     basepath = 'http://slac.stanford.edu/~erykoff/redmapper/catalogs/'
@@ -262,6 +240,7 @@ def download_lowz_and_cmass():
         urlretrieve(url, savename)
         system('gunzip '+savename)
 
+        
 def load_sdss_rand(catalog, hemi):
     catup = catalog.upper()
     hemic = hemi.capitalize()
@@ -301,9 +280,6 @@ def load_sdss_data_both_catalogs(hemi):
     dec = np.hstack([lowz['dec'],cmass['dec']])
     z = np.hstack([lowz['z'],cmass['z']])        
     return {'ra':ra, 'dec':dec, 'z':z}
-
-
-    
 
         
 def do_everything():
