@@ -11,20 +11,68 @@ cosmo = fidcosmo
 
 def main( hemi='south'):
     grid = grid3d(hemi=hemi)
-    n_data = num_sdss_data_both_catalogs(hemi)
-    n_rand = num_sdss_randoms_both_catalogs(hemi)
+    n_data = num_sdss_data_both_catalogs(hemi, grid)
+    n_rand = num_sdss_rand_both_catalogs(hemi, grid)
     n_rand *= (1.*n_data.sum()/n_rand.sum())
     delta, weight = num_to_delta(n_data, n_rand, fwhm_sm=2)
+    vels = delta_to_raw_vels(delta, weight, grid)
+    vlos = vels_to_vel_los_from_observer(vels, grid)
     ipdb.set_trace()
 
     
-def num_sdss_data_both_catalogs(hemi):    
+def delta_to_raw_vels(delta, weight, grid):
+    from numpy.fft import fftn, ifftn
+    vels = np.zeros((3, delta.shape[0], delta.shape[1], delta.shape[2]))
+    ks = get_wavenumbers(delta.shape, grid.reso_mpc)
+    kmag = ks[3]
+    kmag2 = (kmag+1e-9)**(2.)
+    ii = np.complex(0,1)
+    for i in range(3):
+        vels[i,:, :, :] = np.real(ifftn(ii*fftn(delta*weight, axes=[i]) * ks[i] / kmag2, axes=[i]))
+    return vels
+
+def vels_to_vel_los_from_observer(vels, grid):
+    shape = vels.shape[1:]
+    ones = np.ones(shape)
+    x0, y0, z0 = grid.get_voxel_indices([0.], [0.], [0.])
+    xx = np.arange(shape[0])[:,np.newaxis,np.newaxis]*ones
+    yy = np.arange(shape[1])[np.newaxis,:,np.newaxis]*ones    
+    zz = np.arange(shape[2])[np.newaxis,np.newaxis,:]*ones        
+    dd = np.array([xx-x0[0], yy-y0[0], zz-z0[0]])
+    mag = np.sqrt((dd**2.).sum(0))
+    inv_mag = 1./mag
+    inv_mag[mag==0]=0.
+    for i in range(3): dd[i,:,:,:] *= inv_mag
+    vel_los_from_observer = (dd*vels).sum(0)
+    return vel_los_from_observer
+
+
+
+    
+def get_wavenumbers(shape, reso_mpc):
+    assert(len(shape)==3)
+    output=[]
+    ones = np.ones(shape)
+    for i in range(3):
+        tmp = np.fft.fftfreq(shape[i], d=reso_mpc)
+        if i==0:
+            ktmp = tmp[:, np.newaxis, np.newaxis]*ones
+        if i==1:
+            ktmp = tmp[np.newaxis, :, np.newaxis]*ones
+        if i==2:
+            ktmp = tmp[np.newaxis, np.newaxis, :]*ones
+        output.append(ktmp)
+    output.append(np.sqrt(output[0]**2. + output[1]**2. + output[2]**2.))
+    return output
+
+    
+def num_sdss_data_both_catalogs(hemi, grid):    
     d_data = load_sdss_data_both_catalogs(hemi)
     return grid.num_from_radecz(d_data['ra'],d_data['dec'], d_data['z'])
 
-def num_sdss_random_both_catalogs(hemi):    
-    d_random = load_sdss_random_both_catalogs(hemi)
-    return grid.num_from_radecz(d_random['ra'],d_random['dec'], d_random['z'])
+def num_sdss_rand_both_catalogs(hemi, grid):    
+    d_rand = load_sdss_rand_both_catalogs(hemi)
+    return grid.num_from_radecz(d_rand['ra'],d_rand['dec'], d_rand['z'])
 
 
 
@@ -32,7 +80,7 @@ def num_sdss_random_both_catalogs(hemi):
 def num_to_delta(n_data, n_rand, fwhm_sm=2, delta_max=3.):
     from scipy.ndimage import gaussian_filter
     sigma_sm = fwhm_sm/2.355
-    # smooth randoms
+    # smooth rand
     n_rand = gaussian_filter(n_rand, sigma_sm)
 
     # smooth data
@@ -79,7 +127,7 @@ class grid3d(object):
         self.y1d = y1d
         self.z1d = z1d
 
-
+        
     def get_voxel_indices(self, x, y, z):
         ind_x = np.digitize(x, self.x1d)
         ind_y = np.digitize(y, self.y1d)
@@ -104,6 +152,21 @@ class grid3d(object):
         zz = rr*np.cos(th)        
         n = self.num_from_xyz(xx, yy, zz)
         return n
+
+    def vec_to_observer(self):
+        shape = (self.nx, self.ny, self.nz)
+        ones = np.ones(shape)
+        x0, y0, z0 = self.get_voxel_indices([0.], [0.], [0.])
+        xx = np.arange(shape[0])[:,np.newaxis,np.newaxis]*ones
+        yy = np.arange(shape[1])[np.newaxis,:,np.newaxis]*ones
+        zz = np.arange(shape[2])[np.newaxis,np.newaxis,:]*ones
+        return np.array([xx-x0[0], yy-y0[0], zz-z0[0]])
+
+
+    def distance_to_observer(self):
+        rtmp = self.vec_to_observer()
+        return np.sqrt((rtmp**2.).sum(0))
+        
 
 
 def interp_comoving_distance(z, deltaz=1e-3):
@@ -199,7 +262,7 @@ def download_lowz_and_cmass():
         urlretrieve(url, savename)
         system('gunzip '+savename)
 
-def load_sdss_randoms(catalog, hemi):
+def load_sdss_rand(catalog, hemi):
     catup = catalog.upper()
     hemic = hemi.capitalize()
     ra = []; dec=[]; z=[]
@@ -223,9 +286,9 @@ def load_sdss_data(catalog, hemi):
     output = {'ra':tmp['ra'], 'dec':tmp['dec'], 'z':tmp['z']}
     return output
 
-def load_sdss_randoms_both_catalogs(hemi):
-    lowz = load_sdss_randoms('lowz', hemi)
-    cmass = load_sdss_randoms('cmass', hemi)
+def load_sdss_rand_both_catalogs(hemi):
+    lowz = load_sdss_rand('lowz', hemi)
+    cmass = load_sdss_rand('cmass', hemi)
     ra = np.hstack([lowz['ra'],cmass['ra']])
     dec = np.hstack([lowz['dec'],cmass['dec']])
     z = np.hstack([lowz['z'],cmass['z']])        
