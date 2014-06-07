@@ -20,28 +20,46 @@ def main(hemi='south'):
     ipdb.set_trace()
 
 
-def cross_template_with_planck(template):
-    tplanck = load_planck_data()
+def cross_template_with_planck(template, lmax=4000):
+    planck, mask = load_planck_data()
+
+    print '...anafast...'
+    cl_template_planck = hp.anafast(template*mask, map2=planck*mask, lmax=lmax)
+    cl_template = hp.anafast(template*mask, lmax=lmax)
+    cl_planck = hp.anafast(planck*mask, lmax=lmax)
+    
+    # correct some of these for Planck beam function.
     bl, l_bl = load_planck_bl()
-    c_template_planck = hp.anafast(template, map2=tplanck)
-    # correct for BL
-    #bl2use
-    #yout = numpy.interp(xout, xin, yin)
-    
-    ipdb.set_trace()
+    l_bl = l_bl[0:lmax+1]
+    bl = bl[0:lmax+1]
+    cl_template_planck /= (bl)
+    cl_planck /= (bl**2.)
+
+    # get the weighted sum of the template amplitude in this data.
+    amp = np.sum(cl_template_planck/cl_planck)/np.sum(cl_template/cl_planck)
+
+    # tmpp, actually, i should use a theory curve for c_planck.
+    # CL_PLANCK = CMB + noise/bl^2.
+    ipdb.set_trace()    
+    return amp
 
 
-def load_planck_data():
-    tmp = fits.open(datadir+'HFI_SkyMap_217_2048_R1.10_nominal.fits')[1].data
-    return hp.reorder(tmp, out='RING', inp='NESTED')
 
-    
-    
+def load_planck_data(quick=True):
+    #tmpp, need to add these to download functions.
+    planck = fits.open(datadir+'HFI_SkyMap_217_2048_R1.10_nominal.fits')[1].data['I_STOKES']
+    planck = hp.reorder(planck, n2r=True)
+    mask = fits.open(datadir+'HFI_Mask_GalPlane_2048_R1.10.fits')[1].data['GAL060']#tmpp, 40 vs 60?
+    mask = hp.reorder(mask, n2r=True)
+    return planck, mask 
+
+
 def load_planck_bl():
-     x=np.loadtxt(datadir+'HFI_RIMO_R1.10.BEAMWF_143X143.txt')
-     bl = x[:, 0]
-     l_bl = np.arange(len(bl))
-     return bl, l_bl
+    # tmpp, need to add these to download functions.
+    x=np.loadtxt(datadir+'HFI_RIMO_R1.10.BEAMWF_217X217.txt')
+    bl = x[:, 0]
+    l_bl = np.arange(len(bl))
+    return bl, l_bl
 
     
 def create_healpix_template(rm, nside=2**11, n_theta_core=5.):
