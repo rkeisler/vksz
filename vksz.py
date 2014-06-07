@@ -5,19 +5,121 @@ pl.ion()
 datadir = 'data/'
 from astropy.io import fits
 import cPickle as pickle
-#import healpy as hp
+import healpy as hp
 from cosmolopy import distance, fidcosmo, constants
-cosmo = fidcosmo #probably want to put in Planck cosmology at some point.
+cosmo = fidcosmo  #probably want to put in Planck cosmology at some point.
 mpc2km = constants.Mpc_km
+# Unless otherwise noted, distances are in Mpc and velocities are in Mpc/s.
+TCMB = 2.72548 #K
+
 
 def main(hemi='south'):
+    rm = get_cluster_velocities(quick=True)
+    template = create_healpix_template(rm)
+    amp = cross_template_with_planck(template)
+    ipdb.set_trace()
+
+
+def cross_template_with_planck(template):
+    tplanck = load_planck_data()
+    bl, l_bl = load_planck_bl()
+    c_template_planck = hp.anafast(template, map2=tplanck)
+    # correct for BL
+    #bl2use
+    #yout = numpy.interp(xout, xin, yin)
+    
+    ipdb.set_trace()
+
+
+def load_planck_data():
+    tmp = fits.open(datadir+'HFI_SkyMap_217_2048_R1.10_nominal.fits')[1].data
+    return hp.reorder(tmp, out='RING', inp='NESTED')
+
+    
+    
+def load_planck_bl():
+     x=np.loadtxt(datadir+'HFI_RIMO_R1.10.BEAMWF_143X143.txt')
+     bl = x[:, 0]
+     l_bl = np.arange(len(bl))
+     return bl, l_bl
+
+    
+def create_healpix_template(rm, nside=2**11, n_theta_core=5.):
+    fill_free_electron_parameters(rm)
+    # only add those above some weight threshold
+    npix = hp.nside2npix(nside)
+    template = np.zeros(npix)
+    ncl = len(rm['ra'])
+    vec_hpix = hp.ang2vec(rm['th_gal'], rm['phi_gal'])
+    ind_hpix = hp.ang2pix(nside, rm['th_gal'], rm['phi_gal'], nest=False)
+    for i in range(ncl):
+        this_vec = vec_hpix[i,:]
+        this_theta_c = rm['theta_c'][i] #radians
+        this_ind = ind_hpix[i]
+        ind_nearby = hp.query_disc(nside, this_vec, n_theta_core*this_theta_c, nest=False)
+        vec_nearby = hp.pix2vec(nside, ind_nearby, nest=False)
+        theta_nearby = hp.rotator.angdist(this_vec, vec_nearby)
+        values_nearby = 1./(1.+(theta_nearby/this_theta_c)**2.)
+        values_nearby *= rm['t0'][i]
+        template[ind_nearby] += values_nearby
+    return template
+    
+    
+def fill_free_electron_parameters(rm, tau20=0.002):
+    # tau20 is the optical depth to Thomson scattering for a
+    # CMB photon traversing through the center of a Lambda=20 cluster.
+    ncl = len(rm['ra'])
+    tau = []
+    theta_c = []
+    dang = distance.angular_diameter_distance(rm['z_lam'], **cosmo)
+    for i in range(ncl):
+        this_lambda = rm['lam'][i]
+        this_tau = tau20*(this_lambda/20.)
+        this_rc_mpc = 0.36 #tmpp.  should scale with some power of lambda.
+        this_theta_c = this_rc_mpc/dang[i]
+        tau.append(this_tau)
+        theta_c.append(this_theta_c)
+    tau = np.array(tau)
+    theta_c = np.array(theta_c)
+    rm['tau'] = tau
+    rm['theta_c'] = theta_c
+    t0 = -(rm['vlos']/constants.c_light_Mpc_s)*TCMB*rm['tau']
+    rm['t0'] = t0
+    return
+        
+
+    
+def show_vlos(hemi='south'):
     vlos = vlos_for_hemi(hemi)
     pl.clf(); pl.imshow(vlos[:,:,128]*mpc2km,vmin=-200,vmax=200)
     pl.colorbar()
-    pl.title(hemi)
-    ipdb.set_trace()
-    
+    pl.title(hemi+', LOS velocities (km/s)')
 
+
+def get_cluster_velocities(quick=False):
+    savename = datadir+'get_cluster_velocities.pkl'
+    if quick: return pickle.load(open(savename,'r'))
+    rm_s = get_cluster_velocities_one_hemi('south')
+    rm_n = get_cluster_velocities_one_hemi('north')
+    rm={}
+    for k in rm_s.keys():
+        rm[k] = np.hstack([rm_s[k],rm_n[k]])
+    pickle.dump(rm, open(savename,'w'))
+    return rm
+
+    
+    
+def get_cluster_velocities_one_hemi(hemi):
+    vlos, weight, grid = vlos_for_hemi(hemi)
+    rm = load_redmapper(hemi)
+    ix, iy, iz = grid.voxel_indices_from_radecz(rm['ra'], rm['dec'], rm['z_lam'], applyzcut=False)
+    vlos_rm = vlos[ix, iy, iz]
+    weight_rm = weight[ix, iy, iz]
+    rm['vlos'] = vlos_rm
+    rm['weight'] = weight_rm
+    return rm
+
+    
 def vlos_for_hemi(hemi):
     grid = grid3d(hemi=hemi)
     n_data = num_sdss_data_both_catalogs(hemi, grid)
@@ -26,7 +128,7 @@ def vlos_for_hemi(hemi):
     delta, weight = num_to_delta(n_data, n_rand, fwhm_sm=2)
     vels = delta_to_vels(delta, weight, grid)
     vlos = vels_to_vel_los_from_observer(vels, grid)
-    return vlos
+    return vlos, weight, grid
     
 def delta_to_vels(delta, weight, grid):
     from numpy.fft import fftn, ifftn
@@ -154,7 +256,28 @@ class grid3d(object):
             n[xtmp, ytmp, ztmp] += 1.        
         return n
 
+
+    def voxel_indices_from_radecz(self, ra, dec, z, applyzcut=False):
+        xx, yy, zz = self.xyz_from_radecz(ra, dec, z, applyzcut=applyzcut)
+        ix, iy, iz = self.get_voxel_indices(xx, yy, zz)
+        return ix, iy, iz
+
+        
+    def xyz_from_radecz(self, ra, dec, z, applyzcut=True):
+        if applyzcut:
+            wh = np.where((z>self.zmin)&(z<self.zmax))[0]
+            ra=ra[wh]; dec=dec[wh]; z=z[wh]
+        rr = interp_comoving_distance(z)
+        th = (90.-dec)*np.pi/180.
+        phi = ra*np.pi/180.
+        xx = rr*np.sin(th)*np.cos(phi)
+        yy = rr*np.sin(th)*np.sin(phi)
+        zz = rr*np.cos(th)
+        return xx, yy, zz
+
+        
     def num_from_radecz(self, ra, dec, z):
+        '''
         wh = np.where((z>self.zmin)&(z<self.zmax))[0]
         ra=ra[wh]; dec=dec[wh]; z=z[wh]
         rr = interp_comoving_distance(z)
@@ -162,7 +285,9 @@ class grid3d(object):
         phi = ra*np.pi/180.
         xx = rr*np.sin(th)*np.cos(phi)
         yy = rr*np.sin(th)*np.sin(phi)
-        zz = rr*np.cos(th)        
+        zz = rr*np.cos(th)
+        '''
+        xx, yy, zz = self.xyz_from_radecz(ra, dec, z)
         n = self.num_from_xyz(xx, yy, zz)
         return n
 
@@ -214,11 +339,23 @@ def interp_z_dependent_velocity_factors(z, deltaz=1e-3):
     f = interpolate.interp1d(zgrid, tmp_grid)
     return f(z)
     
+
+
+def download_planck():
+    from urllib import urlretrieve
+    basepath = 'http://irsa.ipac.caltech.edu/data/Planck/release_1/all-sky-maps/maps/'
+    file = 'HFI_SkyMap_217_2048_R1.10_nominal.fits'
+    url = basepath + file
+    savename = datadir + file
+    urlretrieve(url, savename)
+
     
 def download_redmapper():
     from urllib import urlretrieve
-    basepath = 'http://slac.stanford.edu/~erykoff/redmapper/catalogs/'
-    file = 'redmapper_dr8_public_v5.2_catalog.fits'
+    #basepath = 'http://slac.stanford.edu/~erykoff/redmapper/catalogs/'
+    #file = 'redmapper_dr8_public_v5.2_catalog.fits'
+    basepath = 'http://www.slac.stanford.edu/~erykoff/catalogs/dr8/'
+    file = 'dr8_run_redmapper_v5.10_lgt20_catalog.fit'
     url = basepath + file
     savename = datadir + file
     urlretrieve(url, savename)
@@ -285,4 +422,29 @@ def load_sdss_data_both_catalogs(hemi):
 def do_everything():
     download_redmapper()
     download_lowz_and_cmass()
+    download_planck()
+    
 
+def load_redmapper(hemi):
+    d = fits.open(datadir+'dr8_run_redmapper_v5.10_lgt20_catalog.fit')[1].data
+    if (hemi=='north'): wh=np.where(np.abs(d['ra']-180.)<100.)[0]
+    if (hemi=='south'): wh=np.where(np.abs(d['ra']-180.)>=100.)[0]
+    d = d[wh]
+    ra = d['ra']
+    dec = d['dec']
+    lam = d['lambda_chisq']
+    z_lam = d['z_lambda']
+    cluster_id = d['mem_match_id']
+
+    # let's go ahead and get the galactic coordinates.
+    from astropy.coordinates import FK5
+    from astropy import units as u
+    coord = FK5(ra=ra, dec=dec, unit=(u.deg, u.deg))
+    l_gal = coord.galactic.l.rad
+    b_gal = coord.galactic.b.rad
+    phi_gal = l_gal
+    th_gal = np.pi/2.-b_gal
+    return {'ra':ra, 'dec':dec, 'lam':lam, 'z_lam':z_lam, 'id':cluster_id, 
+            'l_gal':l_gal, 'b_gal':b_gal, 'phi_gal':phi_gal, 'th_gal':th_gal}
+
+    
