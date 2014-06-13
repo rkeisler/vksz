@@ -20,13 +20,35 @@ def main(hemi='south'):
     ipdb.set_trace()
 
 
-def cross_template_with_planck(template, lmax=4000):
-    planck, mask = load_planck_data()
+def cross_template_with_planck(template, lmax=4000, nrandom=0):
+    # get mask
+    mask = load_planck_mask()
+    mask_factor = np.mean(mask**2.)    
+    
+    # get alm_template
+    
 
+    # get alm_planck and estimate amplitude.
+    if (nrandom==0):
+        planck = load_planck_data()
+        # anafast(planck*mask), return alm
+        # correct by np.sqrt(mask_factor)
+        # calculate amplitude, put into a list
+    else:
+        # loop over nrandoms
+        # directly generate alm's that have planck theory spectrum.
+        # calculate amplitude, append to list
+
+    # return list of amplitudes
+    
     print '...anafast...'
-    cl_template_planck = hp.anafast(template*mask, map2=planck*mask, lmax=lmax)
-    cl_template = hp.anafast(template*mask, lmax=lmax)
-    cl_planck = hp.anafast(planck*mask, lmax=lmax)
+    #cl_planck = hp.anafast(planck*mask, lmax=lmax)/mask_factor
+    #ipdb.set_trace()
+    cl_template_planck = hp.anafast(template*mask, map2=planck*mask, lmax=lmax)/mask_factor
+    l_theory, cl_planck_theory = get_cl_theory()
+    cl_planck = cl_planck_theory
+    assert len(cl_planck)==len(cl_template_planck)
+    cl_template = hp.anafast(template*mask, lmax=lmax)/mask_factor
     
     # correct some of these for Planck beam function.
     bl, l_bl = load_planck_bl()
@@ -35,23 +57,27 @@ def cross_template_with_planck(template, lmax=4000):
     cl_template_planck /= (bl)
     cl_planck /= (bl**2.)
 
-    # get the weighted sum of the template amplitude in this data.
-    amp = np.sum(cl_template_planck/cl_planck)/np.sum(cl_template/cl_planck)
+    # get the weighted sum of the template amplitude in this data.    
+    weight = 1./cl_planck
+    weight[0:10] = 0.
+    amp = np.sum(cl_template_planck*weight)/np.sum(cl_template*weight)
 
-    # tmpp, actually, i should use a theory curve for c_planck.
-    # CL_PLANCK = CMB + noise/bl^2.
-    ipdb.set_trace()    
+    
     return amp
 
 
 
-def load_planck_data(quick=True):
+def load_planck_data():
     #tmpp, need to add these to download functions.
     planck = fits.open(datadir+'HFI_SkyMap_217_2048_R1.10_nominal.fits')[1].data['I_STOKES']
     planck = hp.reorder(planck, n2r=True)
+    return planck
+
+def load_planck_mask():
     mask = fits.open(datadir+'HFI_Mask_GalPlane_2048_R1.10.fits')[1].data['GAL060']#tmpp, 40 vs 60?
     mask = hp.reorder(mask, n2r=True)
-    return planck, mask 
+    return mask
+    
 
 
 def load_planck_bl():
@@ -62,9 +88,12 @@ def load_planck_bl():
     return bl, l_bl
 
     
-def create_healpix_template(rm, nside=2**11, n_theta_core=5.):
+def create_healpix_template(rm, nside=2**11, n_theta_core=5.,
+                            weight_min=0.2, beta=0.7):
     fill_free_electron_parameters(rm)
     # only add those above some weight threshold
+    wh=np.where(rm['weight']>weight_min)[0]
+    for k in rm.keys(): rm[k]=rm[k][wh]
     npix = hp.nside2npix(nside)
     template = np.zeros(npix)
     ncl = len(rm['ra'])
@@ -77,7 +106,7 @@ def create_healpix_template(rm, nside=2**11, n_theta_core=5.):
         ind_nearby = hp.query_disc(nside, this_vec, n_theta_core*this_theta_c, nest=False)
         vec_nearby = hp.pix2vec(nside, ind_nearby, nest=False)
         theta_nearby = hp.rotator.angdist(this_vec, vec_nearby)
-        values_nearby = 1./(1.+(theta_nearby/this_theta_c)**2.)
+        values_nearby = (1.+(theta_nearby/this_theta_c)**2.)**((1.-3.*beta)/2.)
         values_nearby *= rm['t0'][i]
         template[ind_nearby] += values_nearby
     return template
@@ -467,3 +496,42 @@ def load_redmapper(hemi):
             'l_gal':l_gal, 'b_gal':b_gal, 'phi_gal':phi_gal, 'th_gal':th_gal}
 
     
+def gnomview_template(template, rm):
+    hp.gnomview(template*1e6,rot=(8.+np.median(rm['phi_gal'])*180./np.pi, np.median(rm['b_gal'])*180./np.pi, 0), xsize=1000, ysize=1000,min=-2,max=2,reso=0.5, unit='uK')
+    
+
+def get_cl_theory(compare_to_data=False):
+    tmp = np.loadtxt(datadir+'planck2013_TableIICol4_lensedCls.dat')
+    l_theory = np.concatenate([np.array([0,1]),tmp[:,0]])
+    dl_tt_theory = np.concatenate([np.array([0.,0.]), tmp[:,1]/1e12])
+
+    # add poisson
+    uk_arcmin_poisson = 95.
+    cl_poisson = (uk_arcmin_poisson * 1./60.*np.pi/180.)**2. / 1e12
+    dl_poisson = cl_poisson*l_theory*(l_theory+1.)/2./np.pi
+    dl_tt_theory += dl_poisson
+    
+    # multiply sky power by planck beam
+    bl, l_bl = load_planck_bl()
+    assert np.min(l_theory)==np.min(l_bl)
+    l_theory = l_bl
+    dl_tt_theory = dl_tt_theory[0:len(l_theory)]
+    dl_tt_theory *= (bl**2.)
+
+    # add white noise
+    uk_arcmin_noise = 62.
+    cl_noise = (uk_arcmin_noise * 1./60.*np.pi/180.)**2. / 1e12
+    dl_noise = cl_noise*l_theory*(l_theory+1.)/2./np.pi
+    dl_tt_theory += dl_noise
+    cl_tt_theory = dl_tt_theory/l_theory/(l_theory+1.)*2.*np.pi
+    cl_tt_theory[0] = 0.
+
+    if compare_to_data:
+        l, cl = pickle.load(open(datadir+'cl_planck_217.pkl','r'))
+        dl_planck = cl*l*(l+1.)/2./np.pi
+        pl.clf()
+        pl.plot(l_theory, dl_planck/dl_tt_theory)
+        pl.ylim(.5, 1.5)
+        ipdb.set_trace()
+    
+    return l_theory, cl_tt_theory
