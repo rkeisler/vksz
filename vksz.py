@@ -16,51 +16,71 @@ TCMB = 2.72548 #K
 def main(hemi='south'):
     rm = get_cluster_velocities(quick=True)
     template = create_healpix_template(rm)
-    amp = cross_template_with_planck(template)
+    amp_data = cross_template_with_planck(template, nrandom=0)
+    amp_random = cross_template_with_planck(template, nrandom=100)
+    pickle.dump((amp_data, amp_random), open(datadir+'amps.pkl','w'))
     ipdb.set_trace()
 
 
 def cross_template_with_planck(template, lmax=4000, nrandom=0):
     # get mask
     mask = load_planck_mask()
-    mask_factor = np.mean(mask**2.)    
-    
-    # get alm_template
-    
+    mask_factor = np.mean(mask**2.)
 
-    # get alm_planck and estimate amplitude.
-    if (nrandom==0):
-        planck = load_planck_data()
-        # anafast(planck*mask), return alm
-        # correct by np.sqrt(mask_factor)
-        # calculate amplitude, put into a list
-    else:
-        # loop over nrandoms
-        # directly generate alm's that have planck theory spectrum.
-        # calculate amplitude, append to list
-
-    # return list of amplitudes
-    
-    print '...anafast...'
-    #cl_planck = hp.anafast(planck*mask, lmax=lmax)/mask_factor
-    #ipdb.set_trace()
-    cl_template_planck = hp.anafast(template*mask, map2=planck*mask, lmax=lmax)/mask_factor
-    l_theory, cl_planck_theory = get_cl_theory()
-    cl_planck = cl_planck_theory
-    assert len(cl_planck)==len(cl_template_planck)
-    cl_template = hp.anafast(template*mask, lmax=lmax)/mask_factor
-    
-    # correct some of these for Planck beam function.
+    # get planck beam
     bl, l_bl = load_planck_bl()
     l_bl = l_bl[0:lmax+1]
     bl = bl[0:lmax+1]
-    cl_template_planck /= (bl)
+
+    # get CL_PLANCK_THEORY
+    l_planck, cl_planck = get_cl_theory()
+    # store a version of the biased, beam-convolved spectrum.
+    cl_planck_biased = cl_planck.copy()
+    # "unbias" this spectrum, i.e. correct for Planck beam
     cl_planck /= (bl**2.)
 
-    # get the weighted sum of the template amplitude in this data.    
+    # Define how we'll weight the differnet multipoles.
     weight = 1./cl_planck
     weight[0:10] = 0.
-    amp = np.sum(cl_template_planck*weight)/np.sum(cl_template*weight)
+    
+    # get template auto-spectrum
+    cl_template = hp.anafast(template*mask, lmax=lmax)/mask_factor
+    
+    # estimate amplitude(s)
+    amps = []
+    if (nrandom==0):
+        print 'data'
+        planck = load_planck_data()
+        cl_template_planck = hp.anafast(template*mask, map2=planck*mask, lmax=lmax)/mask_factor
+        # correct by one power of planck beam function
+        cl_template_planck /= bl
+        amp = np.sum(cl_template_planck*weight)/np.sum(cl_template*weight)
+        print '%0.3f'%amp
+        amps.append(amp)
+    else:
+        # loop over nrandom
+        for irandom in range(nrandom):
+            print '%i/%i'%(irandom,nrandom)
+            # generate a Planck map
+            planck = hp.synfast(cl_planck_biased, nside, lmax=lmax)
+            cl_template_planck = hp.anafast(template*mask, map2=planck*mask, lmax=lmax)/mask_factor
+            # correct by one power of planck beam function
+            cl_template_planck /= bl
+            amp = np.sum(cl_template_planck*weight)/np.sum(cl_template*weight)
+            print '%0.3f'%amp
+            amps.append(amp)
+
+    # return list of amplitudes
+    return amps
+
+
+ 
+
+
+
+
+
+
 
     
     return amp
