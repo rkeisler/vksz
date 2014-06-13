@@ -211,7 +211,7 @@ def num_sdss_rand_both_catalogs(hemi, grid):
     return grid.num_from_radecz(d_rand['ra'],d_rand['dec'], d_rand['z'])
 
     
-def num_to_delta(n_data, n_rand, fwhm_sm=2, delta_max=3.):
+def num_to_delta(n_data, n_rand, fwhm_sm=2, delta_max=3., linear_bias=2.0):
     from scipy.ndimage import gaussian_filter
     sigma_sm = fwhm_sm/2.355
     # smooth rand
@@ -222,6 +222,7 @@ def num_to_delta(n_data, n_rand, fwhm_sm=2, delta_max=3.):
     n_data = gaussian_filter(n_data, sigma_sm)
 
     delta = (n_data-n_rand)/n_rand
+    delta /= linear_bias
     delta[n_rand==0]=0.
     delta[delta>delta_max]=delta_max
     weight = n_rand/np.max(n_rand)
