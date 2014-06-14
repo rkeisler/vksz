@@ -11,14 +11,15 @@ cosmo = fidcosmo  #probably want to put in Planck cosmology at some point.
 mpc2km = constants.Mpc_km
 # Unless otherwise noted, distances are in Mpc and velocities are in Mpc/s.
 TCMB = 2.72548 #K
-
+nside=2**11
 
 def main(hemi='south'):
     rm = get_cluster_velocities(quick=True)
-    template = create_healpix_template(rm)
+    #template = create_healpix_template(rm)
+    template = create_healpix_tsz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
-    pickle.dump((amp_data, amp_random), open(datadir+'amps.pkl','w'))
+    #pickle.dump((amp_data, amp_random), open(datadir+'amps.pkl','w'))
     ipdb.set_trace()
 
 
@@ -49,6 +50,7 @@ def cross_template_with_planck(template, lmax=4000, nrandom=0):
     # estimate amplitude(s)
     amps = []
     if (nrandom==0):
+        print ' '
         print 'data'
         planck = load_planck_data()
         cl_template_planck = hp.anafast(template*mask, map2=planck*mask, lmax=lmax)/mask_factor
@@ -56,18 +58,25 @@ def cross_template_with_planck(template, lmax=4000, nrandom=0):
         cl_template_planck /= bl
         amp = np.sum(cl_template_planck*weight)/np.sum(cl_template*weight)
         print '%0.3f'%amp
+        print amp
         amps.append(amp)
     else:
+        print ' '
+        print 'randoms'
         # loop over nrandom
         for irandom in range(nrandom):
             print '%i/%i'%(irandom,nrandom)
-            # generate a Planck map
+            # generate a Planck map.
+            # it's roundabout to generate a map from some CL's, then calculate
+            # alm's to cross with the template.  why not directly generate alm's?
+            # because i want to include the effect of multiplying by the real-space mask.
             planck = hp.synfast(cl_planck_biased, nside, lmax=lmax)
             cl_template_planck = hp.anafast(template*mask, map2=planck*mask, lmax=lmax)/mask_factor
             # correct by one power of planck beam function
             cl_template_planck /= bl
             amp = np.sum(cl_template_planck*weight)/np.sum(cl_template*weight)
             print '%0.3f'%amp
+            print amp
             amps.append(amp)
 
     # return list of amplitudes
@@ -90,6 +99,7 @@ def cross_template_with_planck(template, lmax=4000, nrandom=0):
 def load_planck_data():
     #tmpp, need to add these to download functions.
     planck = fits.open(datadir+'HFI_SkyMap_217_2048_R1.10_nominal.fits')[1].data['I_STOKES']
+    #planck = fits.open(datadir+'HFI_SkyMap_143_2048_R1.10_nominal.fits')[1].data['I_STOKES']    #tmpp!!
     planck = hp.reorder(planck, n2r=True)
     return planck
 
@@ -108,7 +118,7 @@ def load_planck_bl():
     return bl, l_bl
 
     
-def create_healpix_template(rm, nside=2**11, n_theta_core=5.,
+def create_healpix_template(rm, n_theta_core=5.,
                             weight_min=0.2, beta=0.7):
     fill_free_electron_parameters(rm)
     # only add those above some weight threshold
@@ -130,7 +140,32 @@ def create_healpix_template(rm, nside=2**11, n_theta_core=5.,
         values_nearby *= rm['t0'][i]
         template[ind_nearby] += values_nearby
     return template
-    
+
+
+def create_healpix_tsz_template(rm, n_theta_core=5.,
+                            weight_min=0.2, beta=0.7):
+    fill_free_electron_parameters(rm)
+    # only add those above some weight threshold
+    wh=np.where(rm['weight']>weight_min)[0]
+    for k in rm.keys(): rm[k]=rm[k][wh]
+    npix = hp.nside2npix(nside)
+    template = np.zeros(npix)
+    ncl = len(rm['ra'])
+    vec_hpix = hp.ang2vec(rm['th_gal'], rm['phi_gal'])
+    ind_hpix = hp.ang2pix(nside, rm['th_gal'], rm['phi_gal'], nest=False)
+    for i in range(ncl):
+        this_vec = vec_hpix[i,:]
+        this_theta_c = rm['theta_c'][i] #radians
+        this_ind = ind_hpix[i]
+        ind_nearby = hp.query_disc(nside, this_vec, n_theta_core*this_theta_c, nest=False)
+        vec_nearby = hp.pix2vec(nside, ind_nearby, nest=False)
+        theta_nearby = hp.rotator.angdist(this_vec, vec_nearby)
+        values_nearby = (1.+(theta_nearby/this_theta_c)**2.)**((1.-3.*beta)/2.)
+        #values_nearby *= rm['t0'][i]
+        template[ind_nearby] += values_nearby
+    return template
+
+
     
 def fill_free_electron_parameters(rm, tau20=0.002):
     # tau20 is the optical depth to Thomson scattering for a
