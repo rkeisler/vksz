@@ -15,11 +15,10 @@ nside=2**11
 
 def main(hemi='south'):
     rm = get_cluster_velocities(quick=True)
-    #template = create_healpix_template(rm)
-    template = create_healpix_tsz_template(rm)
+    template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
-    #pickle.dump((amp_data, amp_random), open(datadir+'amps.pkl','w'))
+    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz.pkl','w'))
     ipdb.set_trace()
 
 
@@ -41,7 +40,9 @@ def cross_template_with_planck(template, lmax=4000, nrandom=0):
     cl_planck /= (bl**2.)
 
     # Define how we'll weight the differnet multipoles.
-    weight = 1./cl_planck
+    # Since we've already gone from 2d to 1d power spectrum, we
+    # need to weight by nmodes=2L+1.
+    weight = (2.*l_planck+1.)/cl_planck
     weight[0:10] = 0.
     
     # get template auto-spectrum
@@ -99,13 +100,17 @@ def cross_template_with_planck(template, lmax=4000, nrandom=0):
 def load_planck_data():
     #tmpp, need to add these to download functions.
     planck = fits.open(datadir+'HFI_SkyMap_217_2048_R1.10_nominal.fits')[1].data['I_STOKES']
-    #planck = fits.open(datadir+'HFI_SkyMap_143_2048_R1.10_nominal.fits')[1].data['I_STOKES']    #tmpp!!
+    #planck = fits.open(datadir+'HFI_SkyMap_143_2048_R1.10_nominal.fits')[1].data['I_STOKES']
     planck = hp.reorder(planck, n2r=True)
     return planck
 
 def load_planck_mask():
-    mask = fits.open(datadir+'HFI_Mask_GalPlane_2048_R1.10.fits')[1].data['GAL060']#tmpp, 40 vs 60?
-    mask = hp.reorder(mask, n2r=True)
+    gmask = fits.open(datadir+'HFI_Mask_GalPlane_2048_R1.10.fits')[1].data['GAL060']#tmpp, 40 vs 60%?
+    gmask = hp.reorder(gmask, n2r=True)
+    pmask = fits.open(datadir+'HFI_Mask_PointSrc_2048_R1.10.fits')[1].data['F217_05']#tmpp, 5 vs 10-sigma?
+    #pmask = fits.open(datadir+'HFI_Mask_PointSrc_2048_R1.10.fits')[1].data['F143_05']#tmpp, 5 vs 10-sigma?
+    pmask = hp.reorder(pmask, n2r=True)
+    mask = gmask*pmask
     return mask
     
 
@@ -118,8 +123,8 @@ def load_planck_bl():
     return bl, l_bl
 
     
-def create_healpix_template(rm, n_theta_core=5.,
-                            weight_min=0.2, beta=0.7):
+def create_healpix_ksz_template(rm, n_theta_core=5.,
+                                weight_min=0.2, beta=0.7):
     fill_free_electron_parameters(rm)
     # only add those above some weight threshold
     wh=np.where(rm['weight']>weight_min)[0]
