@@ -584,3 +584,61 @@ def get_cl_theory(compare_to_data=False):
         ipdb.set_trace()
     
     return l_theory, cl_tt_theory
+
+
+def toy_test_real_vs_harmonic(amp=100., nside=2**5, nexp=1000):
+
+    # generate the signal map
+    npix = hp.nside2npix(nside)
+    signal = np.zeros(npix)
+    ind_hpix = hp.ang2pix(nside, 0., 0., nest=False)
+    signal[ind_hpix] = 1.
+    # get autospectrum of signal
+    lmax = 4*nside-1
+    cl_signal = hp.anafast(signal, lmax=lmax)
+    l = np.arange(len(cl_signal))
+
+    # create white CL's with unit variance
+    nl = np.ones_like(l, dtype=np.float)
+    nl /= (np.sum(nl*(2.*l+1.))/4./np.pi)
+    # create harmonic space weights.  the factor of 
+    # 2L+1 is because we'll be dealing with 1d spectra rather than 2d.
+    weight = (2.*l+1.)/nl
+
+    est_real = []
+    est_harm = []
+    for i in range(nexp):
+        print '%i/%i'%(i,nexp)
+        # make noise map
+        noise = hp.synfast(nl, nside)
+        data = amp*signal + noise
+        # get real space estimate of signal amplitude
+        est_real.append(data[ind_hpix])
+        # get harmonic space estimate of signal amplitude
+        amp_tmp = np.sum(hp.anafast(signal, map2=data, lmax=lmax)*weight) / np.sum(cl_signal*weight)
+        est_harm.append(amp_tmp)
+    est_real = np.array(est_real)
+    est_harm = np.array(est_harm)
+
+    print ' '
+    print ' mean(est_real): %0.2f'%est_real.mean()
+    print ' mean(est_harm): %0.2f'%est_harm.mean()
+    print '  var(est_real): %0.2f'%est_real.var()
+    print '  var(est_harm): %0.2f'%est_harm.var()
+    print '  VarRatio:   %0.2f'%(est_harm.var()/est_real.var())
+    print '  std(est_real): %0.2f'%est_real.std()
+    print '  std(est_harm): %0.2f'%est_harm.std()
+    print '  StdRatio:   %0.2f'%(est_harm.std()/est_real.std())
+    print ' '
+
+    nbins=15
+    pl.clf()
+    pl.hist(est_real,bins=nbins, alpha=0.5)
+    pl.hist(est_harm,bins=nbins, alpha=0.5)
+    pl.legend(['real space','harmonic space'])
+    pl.title('AMP=%0.3f, NEXP=%i, VarRatio=%0.3f'%(amp, nexp, est_harm.var()/est_real.var()))
+    ipdb.set_trace()
+        
+        
+    
+    
