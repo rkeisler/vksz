@@ -84,25 +84,13 @@ def cross_template_with_planck(template, lmax=4000, nrandom=0):
     return amps
 
 
- 
-
-
-
-
-
-
-
-    
-    return amp
-
-
-
 def load_planck_data():
     #tmpp, need to add these to download functions.
     planck = fits.open(datadir+'HFI_SkyMap_217_2048_R1.10_nominal.fits')[1].data['I_STOKES']
     #planck = fits.open(datadir+'HFI_SkyMap_143_2048_R1.10_nominal.fits')[1].data['I_STOKES']
     planck = hp.reorder(planck, n2r=True)
     return planck
+
 
 def load_planck_mask():
     gmask = fits.open(datadir+'HFI_Mask_GalPlane_2048_R1.10.fits')[1].data['GAL060']#tmpp, 40 vs 60%?
@@ -220,10 +208,8 @@ def get_cluster_velocities_one_hemi(hemi):
     vlos, weight, grid = vlos_for_hemi(hemi)
     rm = load_redmapper(hemi)
     ix, iy, iz = grid.voxel_indices_from_radecz(rm['ra'], rm['dec'], rm['z_lam'], applyzcut=False)
-    vlos_rm = vlos[ix, iy, iz]
-    weight_rm = weight[ix, iy, iz]
-    rm['vlos'] = vlos_rm
-    rm['weight'] = weight_rm
+    rm['vlos'] = vlos[ix, iy, iz]
+    rm['weight'] = weight[ix, iy, iz]
     return rm
 
     
@@ -352,12 +338,15 @@ class grid3d(object):
 
         
     def get_voxel_indices(self, x, y, z):
+        # x,y,z are in Mpc and should be within the bounds of self.x1d, etc.
         ind_x = np.digitize(x, self.x1d)
         ind_y = np.digitize(y, self.y1d)
         ind_z = np.digitize(z, self.z1d)
         return ind_x, ind_y, ind_z
-        
+
+
     def num_from_xyz(self, x, y, z):
+        # x,y,z are in Mpc and should be within the bounds of self.x1d, etc.
         n = np.zeros((self.nx, self.ny, self.nz))
         ind_x, ind_y, ind_z = self.get_voxel_indices(x, y, z)
         for xtmp,ytmp,ztmp in zip(ind_x, ind_y, ind_z):
