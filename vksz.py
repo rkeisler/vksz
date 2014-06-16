@@ -14,7 +14,7 @@ TCMB = 2.72548 #K
 nside=2**11
 
 def main(hemi='south'):
-    rm = get_cluster_velocities(quick=True)
+    rm = get_cluster_velocities(quick=False)
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
@@ -79,6 +79,8 @@ def cross_template_with_planck(template, lmax=4000, nrandom=0):
             print '%0.3f'%amp
             print amp
             amps.append(amp)
+            print 'current RMS = %0.3f'%np.std(amps)
+
 
     # return list of amplitudes
     return amps
@@ -218,7 +220,7 @@ def vlos_for_hemi(hemi):
     n_data = num_sdss_data_both_catalogs(hemi, grid)
     n_rand = num_sdss_rand_both_catalogs(hemi, grid)
     n_rand *= (1.*n_data.sum()/n_rand.sum())
-    delta, weight = num_to_delta(n_data, n_rand, fwhm_sm=2)
+    delta, weight = num_to_delta(n_data, n_rand)
     vels = delta_to_vels(delta, weight, grid)
     vlos = vels_to_vel_los_from_observer(vels, grid)
     return vlos, weight, grid
@@ -286,7 +288,7 @@ def num_sdss_rand_both_catalogs(hemi, grid):
     return grid.num_from_radecz(d_rand['ra'],d_rand['dec'], d_rand['z'])
 
     
-def num_to_delta(n_data, n_rand, fwhm_sm=2, delta_max=3., linear_bias=2.0):
+def num_to_delta(n_data, n_rand, fwhm_sm=1.0, delta_max=3., linear_bias=2.0):
     from scipy.ndimage import gaussian_filter
     sigma_sm = fwhm_sm/2.355
     # smooth rand
