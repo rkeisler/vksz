@@ -15,7 +15,8 @@ nside=2**11
 
 def main(hemi='south'):
     rm = get_pairwise_velocities(quick=False)    
-    #rm = get_cluster_velocities(quick=False)
+    #rm_linear = get_linear_velocities(quick=True)
+    #ipdb.set_trace()
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
@@ -199,11 +200,11 @@ def show_vlos(hemi='south'):
     pl.title(hemi+', LOS velocities (km/s)')
 
 
-def get_cluster_velocities(quick=False):
-    savename = datadir+'get_cluster_velocities.pkl'
+def get_linear_velocities(quick=False):
+    savename = datadir+'get_linear_velocities.pkl'
     if quick: return pickle.load(open(savename,'r'))
-    rm_s = get_cluster_velocities_one_hemi('south')
-    rm_n = get_cluster_velocities_one_hemi('north')
+    rm_s = get_linear_velocities_one_hemi('south')
+    rm_n = get_linear_velocities_one_hemi('north')
     rm={}
     for k in rm_s.keys():
         rm[k] = np.hstack([rm_s[k],rm_n[k]])
@@ -224,7 +225,7 @@ def get_pairwise_velocities(quick=False):
 
     
     
-def get_cluster_velocities_one_hemi(hemi):
+def get_linear_velocities_one_hemi(hemi):
     vlos, weight, grid = vlos_for_hemi(hemi)
     rm = load_redmapper(hemi=hemi)
     ix, iy, iz = grid.voxel_indices_from_radecz(rm['ra'], rm['dec'], rm['z_spec'], applyzcut=False)
@@ -782,13 +783,12 @@ def get_pairwise_velocities_one_hemi(hemi):
     #pos_rm = pos_rm[wh_use, :]
         
     # loop over RM clusters, get vlos
-    vlos = []
     ncl = len(rm['ra'])
+    vlos = np.zeros(ncl)    
     r_min = 10.#Mpc, tmpp, worth exploring
     r_pivot = 50.
     r_decay = 50.
     for i in range(ncl):
-        print '%i/%i'%(i,ncl)
         if (lrg_counts[i]<min_counts): continue
         wh_not_too_close = np.where(dist[i]>r_min)[0]        
         these_dist = dist[i][wh_not_too_close]
@@ -796,14 +796,15 @@ def get_pairwise_velocities_one_hemi(hemi):
         # get 3d positions
         these_pos_sdss = pos_sdss[these_ind, :]
         this_pos_rm = pos_rm[i, :]
+        # tmpp, it'd be good to double-check that the distances between these pods don't exceed 200.
         # dot with line of sight
         these_dot_los = dot_los(this_pos_rm, these_pos_sdss)
         these_vel = np.exp(-(these_dist-r_pivot)/r_decay)
         these_vlos = these_vel*these_dot_los
         this_vlos = np.sum(these_vlos) #tmpp, sum or mean?
-        vlos.append(this_vlos)
+        vlos[i] = this_vlos
     rm['vlos'] = vlos
-    rm['weight'] = 1.
+    rm['weight'] = np.ones(ncl)
     return rm
 
 
