@@ -314,8 +314,8 @@ def num_to_delta(n_data, n_rand, fwhm_sm=1.0, delta_max=3., linear_bias=2.0):
     
 class grid3d(object):
     def __init__(self, hemi='south', 
-                 #nx=2**8, ny=2**8, nz=2**8, reso_mpc=16., 
-                 nx=3*2**7, ny=3*2**7, nz=3*2**7, reso_mpc=10.667, 
+                 nx=2**8, ny=2**8, nz=2**8, reso_mpc=16., 
+                 #nx=3*2**7, ny=3*2**7, nz=3*2**7, reso_mpc=10.667, 
                  zmin=0.1, zmax=0.55):
         self.hemi = hemi
         self.reso_mpc = reso_mpc
