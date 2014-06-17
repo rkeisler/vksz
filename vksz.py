@@ -14,11 +14,12 @@ TCMB = 2.72548 #K
 nside=2**11
 
 def main(hemi='south'):
-    rm = get_cluster_velocities(quick=False)
+    rm = get_pairwise_velocities(quick=False)    
+    #rm = get_cluster_velocities(quick=False)
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
-    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz.pkl','w'))
+    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_pwise.pkl','w'))
     ipdb.set_trace()
 
 
@@ -184,7 +185,8 @@ def fill_free_electron_parameters(rm, tau20=0.002):
     theta_c = np.array(theta_c)
     rm['tau'] = tau
     rm['theta_c'] = theta_c
-    t0 = -(rm['vlos']/constants.c_light_Mpc_s)*TCMB*rm['tau']
+    #t0 = -(rm['vlos']/constants.c_light_Mpc_s)*TCMB*rm['tau']
+    t0 = -(rm['vlos'])*TCMB*rm['tau']    #tmpp!
     rm['t0'] = t0
     return
         
@@ -208,11 +210,23 @@ def get_cluster_velocities(quick=False):
     pickle.dump(rm, open(savename,'w'))
     return rm
 
+
+def get_pairwise_velocities(quick=False):
+    savename = datadir+'get_pairwise_velocities.pkl'
+    if quick: return pickle.load(open(savename,'r'))
+    rm_s = get_pairwise_velocities_one_hemi('south')
+    rm_n = get_pairwise_velocities_one_hemi('north')
+    rm={}
+    for k in rm_s.keys():
+        rm[k] = np.hstack([rm_s[k],rm_n[k]])
+    pickle.dump(rm, open(savename,'w'))
+    return rm
+
     
     
 def get_cluster_velocities_one_hemi(hemi):
     vlos, weight, grid = vlos_for_hemi(hemi)
-    rm = load_redmapper(hemi)
+    rm = load_redmapper(hemi=hemi)
     ix, iy, iz = grid.voxel_indices_from_radecz(rm['ra'], rm['dec'], rm['z_spec'], applyzcut=False)
     rm['vlos'] = vlos[ix, iy, iz]
     rm['weight'] = weight[ix, iy, iz]
@@ -531,12 +545,14 @@ def do_everything():
     download_planck()
     
 
-def load_redmapper(hemi):
+def load_redmapper(hemi=None):
     d = fits.open(datadir+'dr8_run_redmapper_v5.10_lgt20_catalog.fit')[1].data
-    
-    if (hemi=='north'): wh_hemi=np.where(np.abs(d['ra']-180.)<100.)[0]
-    if (hemi=='south'): wh_hemi=np.where(np.abs(d['ra']-180.)>=100.)[0]
-    d = d[wh_hemi]
+
+    # if desired, use only one hemisphere.
+    if (hemi!=None):
+        if (hemi.lower()=='north'): wh_hemi=np.where(np.abs(d['ra']-180.)<100.)[0]
+        if (hemi.lower()=='south'): wh_hemi=np.where(np.abs(d['ra']-180.)>=100.)[0]
+        d = d[wh_hemi]
 
     wh_zspec = np.where(d['bcg_spec_z']>0)[0]
     d = d[wh_zspec]
@@ -672,5 +688,134 @@ def toy_test_real_vs_harmonic(amp=100., nside=2**5, nexp=1000):
     ipdb.set_trace()
         
         
+def study_redmapper_lrg_3d(hemi='north'):
+    # create 3d grid object
+    grid = grid3d(hemi=hemi)
     
+    # load SDSS data
+    sdss = load_sdss_data_both_catalogs(hemi)
+    
+    # load redmapper catalog
+    rm = load_redmapper(hemi=hemi)
+    
+    # get XYZ positions (Mpc) of both datasets
+    x_sdss, y_sdss, z_sdss = grid.xyz_from_radecz(sdss['ra'], sdss['dec'], sdss['z'], applyzcut=False)
+    x_rm, y_rm, z_rm = grid.xyz_from_radecz(rm['ra'], rm['dec'], rm['z_spec'], applyzcut=False)
+    pos_sdss = np.vstack([x_sdss, y_sdss, z_sdss]).T
+    pos_rm = np.vstack([x_rm, y_rm, z_rm]).T
+
+    # build a couple of KDTree's, one for SDSS, one for RM.
+    from sklearn.neighbors import KDTree
+    tree_sdss = KDTree(pos_sdss, leaf_size=30)
+    tree_rm = KDTree(pos_rm, leaf_size=30)
+
+    lrg_counts = tree_sdss.query_radius(pos_rm, 100., count_only=True)
+    pl.clf()
+    pl.hist(lrg_counts, bins=50)
+    
+    
+    ipdb.set_trace()
+
+
+def study_redmapper_2d():
+    # I just want to know the typical angular separation for RM clusters.
+    # I'm going to do this in a lazy way.
+    hemi = 'north'
+    rm = load_redmapper(hemi=hemi)
+    ra = rm['ra']
+    dec = rm['dec']
+    ncl = len(ra)
+    dist = np.zeros((ncl, ncl))
+    for i in range(ncl):
+        this_ra = ra[i]
+        this_dec = dec[i]
+        dra = this_ra-ra
+        ddec = this_dec-dec
+        dxdec = dra*np.cos(this_dec*np.pi/180.)
+        dd = np.sqrt(dxdec**2. + ddec**2.)
+        dist[i,:] = dd
+        dist[i,i] = 99999999.
+    d_near_arcmin = dist.min(0)*60.
+    pl.clf(); pl.hist(d_near_arcmin, bins=100)
+    pl.title('Distance to Nearest Neighbor for RM clusters')
+    pl.xlabel('Distance (arcmin)')
+    pl.ylabel('N')
+    fwhm_planck_217 = 5.5 # arcmin
+    sigma = fwhm_planck_217/2.355
+    frac_2sigma = 1.*len(np.where(d_near_arcmin>2.*sigma)[0])/len(d_near_arcmin)
+    frac_3sigma = 1.*len(np.where(d_near_arcmin>3.*sigma)[0])/len(d_near_arcmin)
+    print '%0.3f percent of RM clusters are separated by 2-sigma_planck_beam'%(100.*frac_2sigma)
+    print '%0.3f percent of RM clusters are separated by 3-sigma_planck_beam'%(100.*frac_3sigma)    
+    ipdb.set_trace()
+
+
+def get_pairwise_velocities_one_hemi(hemi):
+    # create 3d grid object
+    grid = grid3d(hemi=hemi)
+    
+    # load SDSS data
+    sdss = load_sdss_data_both_catalogs(hemi)
+    
+    # load redmapper catalog
+    rm = load_redmapper(hemi=hemi)
+    
+    # get XYZ positions (Mpc) of both datasets
+    x_sdss, y_sdss, z_sdss = grid.xyz_from_radecz(sdss['ra'], sdss['dec'], sdss['z'], applyzcut=False)
+    x_rm, y_rm, z_rm = grid.xyz_from_radecz(rm['ra'], rm['dec'], rm['z_spec'], applyzcut=False)
+    pos_sdss = np.vstack([x_sdss, y_sdss, z_sdss]).T
+    pos_rm = np.vstack([x_rm, y_rm, z_rm]).T
+
+    # build a KDTree for SDSS LRG's.
+    from sklearn.neighbors import KDTree
+    tree_sdss = KDTree(pos_sdss, leaf_size=30)
+    # find those RM clusters that have some number of LRG's within X Mpc.
+    r_max = 200. # Mpc
+    lrg_counts = tree_sdss.query_radius(pos_rm, r_max, count_only=True)
+    ind, dist = tree_sdss.query_radius(pos_rm, r_max, count_only=False, return_distance=True)    
+    #min_counts = np.percentile(lrg_counts, 10)
+    min_counts = 500.
+    #wh_use = np.where(lrg_counts>min_counts)[0]
+    #for k in rm.keys(): rm[k] = rm[k][wh_use]
+    #lrg_counts = lrg_counts[wh_use]
+    #ind = ind[wh_use]
+    #dist = dist[wh_use]
+    #pos_rm = pos_rm[wh_use, :]
+        
+    # loop over RM clusters, get vlos
+    vlos = []
+    ncl = len(rm['ra'])
+    r_min = 10.#Mpc, tmpp, worth exploring
+    r_pivot = 50.
+    r_decay = 50.
+    for i in range(ncl):
+        print '%i/%i'%(i,ncl)
+        if (lrg_counts[i]<min_counts): continue
+        wh_not_too_close = np.where(dist[i]>r_min)[0]        
+        these_dist = dist[i][wh_not_too_close]
+        these_ind = ind[i][wh_not_too_close]
+        # get 3d positions
+        these_pos_sdss = pos_sdss[these_ind, :]
+        this_pos_rm = pos_rm[i, :]
+        # dot with line of sight
+        these_dot_los = dot_los(this_pos_rm, these_pos_sdss)
+        these_vel = np.exp(-(these_dist-r_pivot)/r_decay)
+        these_vlos = these_vel*these_dot_los
+        this_vlos = np.sum(these_vlos) #tmpp, sum or mean?
+        vlos.append(this_vlos)
+    rm['vlos'] = vlos
+    rm['weight'] = 1.
+    return rm
+
+
+def dot_los(this_pos, these_pos):
+    r_diff = this_pos-these_pos
+    #tmpp, note that the following differs slightly
+    # from definition given in Keisler&Schmidt.
+    # should be very similar, but need to check.
+    r_avg = 0.5*(this_pos+these_pos) 
+    r_diff_hat = r_diff / np.sqrt((r_diff**2.).sum(1))[:, np.newaxis]
+    r_avg_hat = r_avg / np.sqrt((r_avg**2.).sum(1))[:, np.newaxis]
+    these_dot_los = (r_diff_hat*r_avg_hat).sum(1)
+    return these_dot_los
+
     
