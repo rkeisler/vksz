@@ -91,6 +91,8 @@ def load_planck_data():
     planck = fits.open(datadir+'HFI_SkyMap_217_2048_R1.10_nominal.fits')[1].data['I_STOKES']
     #planck = fits.open(datadir+'HFI_SkyMap_143_2048_R1.10_nominal.fits')[1].data['I_STOKES']
     planck = hp.reorder(planck, n2r=True)
+    planck[planck<(-1000e-6)]=0.
+    planck[planck>(+1000e-6)]=0.    
     return planck
 
 
@@ -118,6 +120,7 @@ def create_healpix_ksz_template(rm, n_theta_core=5.,
     fill_free_electron_parameters(rm)
     # only add those above some weight threshold
     wh=np.where(rm['weight']>weight_min)[0]
+    print 'USING %i CLUSTERS WITH WEIGHT>%0.2f'%(len(wh), weight_min)
     for k in rm.keys(): rm[k]=rm[k][wh]
     npix = hp.nside2npix(nside)
     template = np.zeros(npix)
@@ -142,6 +145,7 @@ def create_healpix_tsz_template(rm, n_theta_core=5.,
     fill_free_electron_parameters(rm)
     # only add those above some weight threshold
     wh=np.where(rm['weight']>weight_min)[0]
+    print 'USING %i CLUSTERS WITH WEIGHT>%0.2f'%(len(wh), weight_min)    
     for k in rm.keys(): rm[k]=rm[k][wh]
     npix = hp.nside2npix(nside)
     template = np.zeros(npix)
@@ -172,7 +176,7 @@ def fill_free_electron_parameters(rm, tau20=0.002):
     for i in range(ncl):
         this_lambda = rm['lam'][i]
         this_tau = tau20*(this_lambda/20.)
-        this_rc_mpc = 0.36 #tmpp.  should scale with some power of lambda.
+        this_rc_mpc = 0.25 #tmpp.  should scale with some power of lambda.
         this_theta_c = this_rc_mpc/dang[i]
         tau.append(this_tau)
         theta_c.append(this_theta_c)
@@ -292,11 +296,13 @@ def num_to_delta(n_data, n_rand, fwhm_sm=1.0, delta_max=3., linear_bias=2.0):
     from scipy.ndimage import gaussian_filter
     sigma_sm = fwhm_sm/2.355
     # smooth rand
-    n_rand = gaussian_filter(n_rand, sigma_sm)
+    if (fwhm_sm>1.):    
+        n_rand = gaussian_filter(n_rand, sigma_sm)
 
     # smooth data
     # tmpp, replace with a filter that knows about LSS and shot noise.
-    n_data = gaussian_filter(n_data, sigma_sm)
+    if (fwhm_sm>1.):
+        n_data = gaussian_filter(n_data, sigma_sm)
 
     delta = (n_data-n_rand)/n_rand
     delta /= linear_bias
@@ -307,8 +313,9 @@ def num_to_delta(n_data, n_rand, fwhm_sm=1.0, delta_max=3., linear_bias=2.0):
 
     
 class grid3d(object):
-    def __init__(self, hemi='south', reso_mpc=16.0, 
-                 nx=2**8, ny=2**8, nz=2**8, 
+    def __init__(self, hemi='south', 
+                 #nx=2**8, ny=2**8, nz=2**8, reso_mpc=16., 
+                 nx=3*2**7, ny=3*2**7, nz=3*2**7, reso_mpc=10.667, 
                  zmin=0.1, zmax=0.55):
         self.hemi = hemi
         self.reso_mpc = reso_mpc
@@ -549,15 +556,29 @@ def load_redmapper(hemi):
     
 def gnomview_template(template, rm):
     hp.gnomview(template*1e6,rot=(8.+np.median(rm['phi_gal'])*180./np.pi, np.median(rm['b_gal'])*180./np.pi, 0), xsize=1000, ysize=1000,min=-2,max=2,reso=0.5, unit='uK')
-    
 
+
+def make_cl_planck_data():
+    savename = datadir+'cl_planck_217.pkl'
+    # get mask
+    mask = load_planck_mask()
+    mask_factor = np.mean(mask**2.)
+    # get planck data
+    planck = load_planck_data()
+    cl_planck = hp.anafast(mask*planck, lmax=4000)/mask_factor
+    l_planck = np.arange(len(cl_planck))
+    pickle.dump((l_planck, cl_planck), open(savename,'w'))
+    
+    
 def get_cl_theory(compare_to_data=False):
+    # this is the *biased* spectrum.
+    # i.e. it has not been corrected by planck beam.
     tmp = np.loadtxt(datadir+'planck2013_TableIICol4_lensedCls.dat')
     l_theory = np.concatenate([np.array([0,1]),tmp[:,0]])
     dl_tt_theory = np.concatenate([np.array([0.,0.]), tmp[:,1]/1e12])
 
     # add poisson
-    uk_arcmin_poisson = 95.
+    uk_arcmin_poisson = 80.
     cl_poisson = (uk_arcmin_poisson * 1./60.*np.pi/180.)**2. / 1e12
     dl_poisson = cl_poisson*l_theory*(l_theory+1.)/2./np.pi
     dl_tt_theory += dl_poisson
@@ -578,6 +599,8 @@ def get_cl_theory(compare_to_data=False):
     cl_tt_theory[0] = 0.
 
     if compare_to_data:
+        # you may want to remake this pkl file first using
+        # make_cl_planck_data()
         l, cl = pickle.load(open(datadir+'cl_planck_217.pkl','r'))
         dl_planck = cl*l*(l+1.)/2./np.pi
         pl.clf()
