@@ -116,7 +116,7 @@ def load_planck_bl():
 
     
 def create_healpix_ksz_template(rm, n_theta_core=5.,
-                                weight_min=0.2, beta=0.7):
+                                weight_min=0.1, beta=0.7):
     fill_free_electron_parameters(rm)
     # only add those above some weight threshold
     wh=np.where(rm['weight']>weight_min)[0]
@@ -141,7 +141,7 @@ def create_healpix_ksz_template(rm, n_theta_core=5.,
 
 
 def create_healpix_tsz_template(rm, n_theta_core=5.,
-                            weight_min=0.2, beta=0.7):
+                            weight_min=0.1, beta=0.7):
     fill_free_electron_parameters(rm)
     # only add those above some weight threshold
     wh=np.where(rm['weight']>weight_min)[0]
