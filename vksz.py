@@ -538,14 +538,14 @@ def load_redmapper(hemi):
     if (hemi=='south'): wh_hemi=np.where(np.abs(d['ra']-180.)>=100.)[0]
     d = d[wh_hemi]
 
-    wh_zspec = np.where(d['z_spec']>0)[0]
+    wh_zspec = np.where(d['bcg_spec_z']>0)[0]
     d = d[wh_zspec]
 
     ra = d['ra']
     dec = d['dec']
     lam = d['lambda_chisq']
     z_lam = d['z_lambda']
-    z_spec = d['z_spec']
+    z_spec = d['bcg_spec_z']
     cluster_id = d['mem_match_id']
 
     # let's go ahead and get the galactic coordinates.
