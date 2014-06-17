@@ -172,7 +172,7 @@ def fill_free_electron_parameters(rm, tau20=0.002):
     ncl = len(rm['ra'])
     tau = []
     theta_c = []
-    dang = distance.angular_diameter_distance(rm['z_lam'], **cosmo)
+    dang = distance.angular_diameter_distance(rm['z_spec'], **cosmo)
     for i in range(ncl):
         this_lambda = rm['lam'][i]
         this_tau = tau20*(this_lambda/20.)
@@ -213,7 +213,7 @@ def get_cluster_velocities(quick=False):
 def get_cluster_velocities_one_hemi(hemi):
     vlos, weight, grid = vlos_for_hemi(hemi)
     rm = load_redmapper(hemi)
-    ix, iy, iz = grid.voxel_indices_from_radecz(rm['ra'], rm['dec'], rm['z_lam'], applyzcut=False)
+    ix, iy, iz = grid.voxel_indices_from_radecz(rm['ra'], rm['dec'], rm['z_spec'], applyzcut=False)
     rm['vlos'] = vlos[ix, iy, iz]
     rm['weight'] = weight[ix, iy, iz]
     return rm
@@ -533,13 +533,19 @@ def do_everything():
 
 def load_redmapper(hemi):
     d = fits.open(datadir+'dr8_run_redmapper_v5.10_lgt20_catalog.fit')[1].data
-    if (hemi=='north'): wh=np.where(np.abs(d['ra']-180.)<100.)[0]
-    if (hemi=='south'): wh=np.where(np.abs(d['ra']-180.)>=100.)[0]
-    d = d[wh]
+    
+    if (hemi=='north'): wh_hemi=np.where(np.abs(d['ra']-180.)<100.)[0]
+    if (hemi=='south'): wh_hemi=np.where(np.abs(d['ra']-180.)>=100.)[0]
+    d = d[wh_hemi]
+
+    wh_zspec = np.where(d['z_spec']>0)[0]
+    d = d[wh_zspec]
+
     ra = d['ra']
     dec = d['dec']
     lam = d['lambda_chisq']
     z_lam = d['z_lambda']
+    z_spec = d['z_spec']
     cluster_id = d['mem_match_id']
 
     # let's go ahead and get the galactic coordinates.
@@ -550,7 +556,8 @@ def load_redmapper(hemi):
     b_gal = coord.galactic.b.rad
     phi_gal = l_gal
     th_gal = np.pi/2.-b_gal
-    return {'ra':ra, 'dec':dec, 'lam':lam, 'z_lam':z_lam, 'id':cluster_id, 
+    return {'ra':ra, 'dec':dec, 'lam':lam, 'id':cluster_id, 
+            'z_lam':z_lam, 'z_spec':z_spec, 
             'l_gal':l_gal, 'b_gal':b_gal, 'phi_gal':phi_gal, 'th_gal':th_gal}
 
     
