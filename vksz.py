@@ -12,22 +12,26 @@ mpc2km = constants.Mpc_km
 # Unless otherwise noted, distances are in Mpc and velocities are in Mpc/s.
 TCMB = 2.72548 #K
 nside=2**11
+lmax=4000
+
 
 def main(hemi='south'):
-    rm = get_pairwise_velocities(quick=False)    
+    #rm = get_pairwise_velocities(quick=False)    
     #rm_linear = get_linear_velocities(quick=True)
     #wh=np.where(rm_linear['weight']>.2)[0]; pl.clf();
     #pl.plot(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh], '.')
     #print np.corrcoef(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh])[0,1]    
     #ipdb.set_trace()
+
+    rm = get_linear_velocities(quick=True)    
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
-    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_pwise.pkl','w'))
+    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_smica4000.pkl','w'))
     ipdb.set_trace()
 
 
-def cross_template_with_planck(template, lmax=4000, nrandom=0):
+def cross_template_with_planck(template, nrandom=0):
     # get mask
     mask = load_planck_mask()
     mask_factor = np.mean(mask**2.)
@@ -93,9 +97,13 @@ def cross_template_with_planck(template, lmax=4000, nrandom=0):
 
 
 def load_planck_data():
+    '''
     #tmpp, need to add these to download functions.
     planck = fits.open(datadir+'HFI_SkyMap_217_2048_R1.10_nominal.fits')[1].data['I_STOKES']
     #planck = fits.open(datadir+'HFI_SkyMap_143_2048_R1.10_nominal.fits')[1].data['I_STOKES']
+    '''
+    planck = fits.open(datadir+'COM_CompMap_CMB-smica_2048_R1.20.fits')[1].data['I']
+    planck *= (1e-6) # convert from uK to K
     planck = hp.reorder(planck, n2r=True)
     planck[planck<(-1000e-6)]=0.
     planck[planck>(+1000e-6)]=0.    
@@ -103,6 +111,7 @@ def load_planck_data():
 
 
 def load_planck_mask():
+    '''
     gmask = fits.open(datadir+'HFI_Mask_GalPlane_2048_R1.10.fits')[1].data['GAL060']#tmpp, 40 vs 60%?
     pmask = np.ones_like(gmask, dtype=np.float)
     tmp = fits.open(datadir+'HFI_Mask_PointSrc_2048_R1.10.fits')[1].data
@@ -110,15 +119,21 @@ def load_planck_mask():
     for band in [217]:        #tmpp
         pmask *= tmp['F%i_05'%band]
     mask = gmask*pmask
+    '''
+    mask = fits.open(datadir+'COM_CompMap_CMB-smica_2048_R1.20.fits')[1].data['VALMASK'] # tmpp, could try I_MASK
     mask = hp.reorder(mask, n2r=True)    
     return mask
 
 
 
-def load_planck_bl(band):
+def load_planck_bl():
+    '''
     # tmpp, need to add these to download functions.
     x=np.loadtxt(datadir+'HFI_RIMO_R1.10.BEAMWF_%iX%i.txt'%(band,band))
     bl = x[:, 0]
+    l_bl = np.arange(len(bl))    
+    '''
+    bl = fits.open(datadir+'COM_CompMap_CMB-smica_2048_R1.20.fits')[4].data['beam_wf']
     l_bl = np.arange(len(bl))
     return bl, l_bl
 
@@ -174,7 +189,7 @@ def create_healpix_tsz_template(rm, n_theta_core=5.,
 
 
     
-def fill_free_electron_parameters(rm, tau20=0.002):
+def fill_free_electron_parameters(rm, tau20=0.001):
     # tau20 is the optical depth to Thomson scattering for a
     # CMB photon traversing through the center of a Lambda=20 cluster.
     ncl = len(rm['ra'])
@@ -608,7 +623,8 @@ def get_cl_theory(compare_to_data=False):
     dl_tt_theory = np.concatenate([np.array([0.,0.]), tmp[:,1]/1e12])
 
     # add poisson
-    uk_arcmin_poisson = 80.
+    #uk_arcmin_poisson = 80.
+    uk_arcmin_poisson = 0.    
     cl_poisson = (uk_arcmin_poisson * 1./60.*np.pi/180.)**2. / 1e12
     dl_poisson = cl_poisson*l_theory*(l_theory+1.)/2./np.pi
     dl_tt_theory += dl_poisson
@@ -621,7 +637,8 @@ def get_cl_theory(compare_to_data=False):
     dl_tt_theory *= (bl**2.)
 
     # add white noise
-    uk_arcmin_noise = 62.
+    #uk_arcmin_noise = 62.
+    uk_arcmin_noise = 58.
     cl_noise = (uk_arcmin_noise * 1./60.*np.pi/180.)**2. / 1e12
     dl_noise = cl_noise*l_theory*(l_theory+1.)/2./np.pi
     dl_tt_theory += dl_noise
@@ -631,11 +648,19 @@ def get_cl_theory(compare_to_data=False):
     if compare_to_data:
         # you may want to remake this pkl file first using
         # make_cl_planck_data()
+        '''
         l, cl = pickle.load(open(datadir+'cl_planck_217.pkl','r'))
         dl_planck = cl*l*(l+1.)/2./np.pi
+        '''
+        mask = load_planck_mask()
+        mask_factor = np.mean(mask**2.)        
+        planck = load_planck_data()
+        cl_planck = hp.anafast(planck*mask, lmax=lmax)/mask_factor
+        l_planck = np.arange(len(cl_planck))
+        dl_planck = cl_planck*l_planck*(l_planck+1.)/2./np.pi
         pl.clf()
         pl.plot(l_theory, dl_planck/dl_tt_theory)
-        pl.ylim(.5, 1.5)
+        pl.ylim(.8, 1.2)
         ipdb.set_trace()
     
     return l_theory, cl_tt_theory
@@ -649,8 +674,8 @@ def toy_test_real_vs_harmonic(amp=100., nside=2**5, nexp=1000):
     ind_hpix = hp.ang2pix(nside, 0., 0., nest=False)
     signal[ind_hpix] = 1.
     # get autospectrum of signal
-    lmax = 4*nside-1
-    cl_signal = hp.anafast(signal, lmax=lmax)
+    lmax_tmp = 4*nside-1
+    cl_signal = hp.anafast(signal, lmax=lmax_tmp)
     l = np.arange(len(cl_signal))
 
     # create white CL's with unit variance
@@ -670,7 +695,7 @@ def toy_test_real_vs_harmonic(amp=100., nside=2**5, nexp=1000):
         # get real space estimate of signal amplitude
         est_real.append(data[ind_hpix])
         # get harmonic space estimate of signal amplitude
-        amp_tmp = np.sum(hp.anafast(signal, map2=data, lmax=lmax)*weight) / np.sum(cl_signal*weight)
+        amp_tmp = np.sum(hp.anafast(signal, map2=data, lmax=lmax_tmp)*weight) / np.sum(cl_signal*weight)
         est_harm.append(amp_tmp)
     est_real = np.array(est_real)
     est_harm = np.array(est_harm)
@@ -840,7 +865,7 @@ def study_multiband_planck(quick=True):
             this_map = hp.reorder(this_map, n2r=True)
             this_map[this_map<(-1000e-6)]=0.
             this_map[this_map>(+1000e-6)]=0.    
-            this_cl = hp.anafast(this_map*mask, lmax=3000)/mask_factor
+            this_cl = hp.anafast(this_map*mask, lmax=lmax)/mask_factor
             cl[band] = this_cl
         pickle.dump(cl, open(savename,'w'))
 
