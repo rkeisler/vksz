@@ -16,6 +16,9 @@ nside=2**11
 def main(hemi='south'):
     rm = get_pairwise_velocities(quick=False)    
     #rm_linear = get_linear_velocities(quick=True)
+    #wh=np.where(rm_linear['weight']>.2)[0]; pl.clf();
+    #pl.plot(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh], '.')
+    #print np.corrcoef(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh])[0,1]    
     #ipdb.set_trace()
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
@@ -81,7 +84,8 @@ def cross_template_with_planck(template, lmax=4000, nrandom=0):
             print '%0.3f'%amp
             print amp
             amps.append(amp)
-            print 'current RMS = %0.3f'%np.std(amps)
+            print 'current RMS:'
+            print np.std(amps)
 
 
     # return list of amplitudes
@@ -100,18 +104,20 @@ def load_planck_data():
 
 def load_planck_mask():
     gmask = fits.open(datadir+'HFI_Mask_GalPlane_2048_R1.10.fits')[1].data['GAL060']#tmpp, 40 vs 60%?
-    gmask = hp.reorder(gmask, n2r=True)
-    pmask = fits.open(datadir+'HFI_Mask_PointSrc_2048_R1.10.fits')[1].data['F217_05']#tmpp, 5 vs 10-sigma?
-    #pmask = fits.open(datadir+'HFI_Mask_PointSrc_2048_R1.10.fits')[1].data['F143_05']#tmpp, 5 vs 10-sigma?
-    pmask = hp.reorder(pmask, n2r=True)
+    pmask = np.ones_like(gmask, dtype=np.float)
+    tmp = fits.open(datadir+'HFI_Mask_PointSrc_2048_R1.10.fits')[1].data
+    #for band in [100, 143, 217]:
+    for band in [217]:        #tmpp
+        pmask *= tmp['F%i_05'%band]
     mask = gmask*pmask
+    mask = hp.reorder(mask, n2r=True)    
     return mask
-    
 
 
-def load_planck_bl():
+
+def load_planck_bl(band):
     # tmpp, need to add these to download functions.
-    x=np.loadtxt(datadir+'HFI_RIMO_R1.10.BEAMWF_217X217.txt')
+    x=np.loadtxt(datadir+'HFI_RIMO_R1.10.BEAMWF_%iX%i.txt'%(band,band))
     bl = x[:, 0]
     l_bl = np.arange(len(bl))
     return bl, l_bl
@@ -773,8 +779,8 @@ def get_pairwise_velocities_one_hemi(hemi):
     r_max = 200. # Mpc
     lrg_counts = tree_sdss.query_radius(pos_rm, r_max, count_only=True)
     ind, dist = tree_sdss.query_radius(pos_rm, r_max, count_only=False, return_distance=True)    
-    #min_counts = np.percentile(lrg_counts, 10)
-    min_counts = 500.
+    min_counts = np.percentile(lrg_counts, 10)
+    #min_counts = 500.
     #wh_use = np.where(lrg_counts>min_counts)[0]
     #for k in rm.keys(): rm[k] = rm[k][wh_use]
     #lrg_counts = lrg_counts[wh_use]
@@ -785,9 +791,9 @@ def get_pairwise_velocities_one_hemi(hemi):
     # loop over RM clusters, get vlos
     ncl = len(rm['ra'])
     vlos = np.zeros(ncl)    
-    r_min = 10.#Mpc, tmpp, worth exploring
-    r_pivot = 50.
-    r_decay = 50.
+    r_min = 3.#Mpc, tmpp, worth exploring
+    r_pivot = 10.
+    r_decay = 10.
     for i in range(ncl):
         if (lrg_counts[i]<min_counts): continue
         wh_not_too_close = np.where(dist[i]>r_min)[0]        
@@ -796,10 +802,11 @@ def get_pairwise_velocities_one_hemi(hemi):
         # get 3d positions
         these_pos_sdss = pos_sdss[these_ind, :]
         this_pos_rm = pos_rm[i, :]
-        # tmpp, it'd be good to double-check that the distances between these pods don't exceed 200.
+
         # dot with line of sight
         these_dot_los = dot_los(this_pos_rm, these_pos_sdss)
         these_vel = np.exp(-(these_dist-r_pivot)/r_decay)
+        #these_vel = np.exp(-0.5*(these_dist/r_decay)**2.)
         these_vlos = these_vel*these_dot_los
         this_vlos = np.sum(these_vlos) #tmpp, sum or mean?
         vlos[i] = this_vlos
@@ -809,7 +816,7 @@ def get_pairwise_velocities_one_hemi(hemi):
 
 
 def dot_los(this_pos, these_pos):
-    r_diff = this_pos-these_pos
+    r_diff = these_pos-this_pos
     #tmpp, note that the following differs slightly
     # from definition given in Keisler&Schmidt.
     # should be very similar, but need to check.
@@ -820,3 +827,61 @@ def dot_los(this_pos, these_pos):
     return these_dot_los
 
     
+def study_multiband_planck(quick=True):
+    savename = datadir+'cl_multiband.pkl'
+    bands = [100, 143, 217]    
+    if quick: cl = pickle.load(open(savename,'r'))
+    else:
+        cl = {}
+        mask = load_planck_mask()
+        mask_factor = np.mean(mask**2.)
+        for band in bands:
+            this_map = fits.open(datadir+'HFI_SkyMap_%i_2048_R1.10_nominal.fits'%band)[1].data['I_STOKES']
+            this_map = hp.reorder(this_map, n2r=True)
+            this_map[this_map<(-1000e-6)]=0.
+            this_map[this_map>(+1000e-6)]=0.    
+            this_cl = hp.anafast(this_map*mask, lmax=3000)/mask_factor
+            cl[band] = this_cl
+        pickle.dump(cl, open(savename,'w'))
+
+
+    uk_arcmin_poisson = {100:80., 143:100., 217:80.}
+    uk_arcmin_noise = {100:70., 143:40., 217:62.}
+    cl_theory = {}
+    tmp = np.loadtxt(datadir+'planck2013_TableIICol4_lensedCls.dat')
+    l_theory = np.concatenate([np.array([0,1]),tmp[:,0]])
+    dl_cmb_theory = np.concatenate([np.array([0.,0.]), tmp[:,1]/1e12])
+    cl_cmb_theory = dl_cmb_theory/l_theory/(l_theory+1.)*2.*np.pi
+    cl_cmb_theory[0] = 0.
+
+    pl.clf()
+    for band in bands:
+        # get sky power, which is CMB + Poisson
+        # CMB
+        cl_theory[band] = cl_cmb_theory
+        # Poisson
+        this_uk_arcmin_poisson = uk_arcmin_poisson[band]
+        cl_poisson = (this_uk_arcmin_poisson * 1./60.*np.pi/180.)**2. / 1e12
+        cl_theory[band] += cl_poisson
+    
+        # multiply sky power by planck beam
+        bl, l_bl = load_planck_bl(band)
+        assert np.min(l_theory)==np.min(l_bl)
+        l_theory = l_bl
+        cl_theory[band] = cl_theory[band][0:len(l_theory)]
+        cl_theory[band] *= (bl**2.)
+        
+        # add white noise
+        this_uk_arcmin_noise = uk_arcmin_noise[band]
+        cl_noise = (this_uk_arcmin_noise * 1./60.*np.pi/180.)**2. / 1e12
+        cl_theory[band] += cl_noise
+
+        this_cl = cl[band]
+        this_cl_theory = cl_theory[band][0:len(this_cl)]
+        pl.plot(this_cl/this_cl_theory)
+    pl.legend(bands)
+    pl.plot([0,3000],[1,1],'k--')
+    pl.ylim(.5,2.)
+    
+    ipdb.set_trace()
+    return planck    
