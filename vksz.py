@@ -209,7 +209,8 @@ def fill_free_electron_parameters(rm, tau20=0.001):
     for i in range(ncl):
         this_lambda = rm['lam'][i]
         this_tau = tau20*(this_lambda/20.)
-        this_rc_mpc = 0.25 #tmpp.  should scale with some power of lambda.
+        #this_rc_mpc = 0.25 #tmpp.  should scale with some power of lambda.
+        this_rc_mpc = 0.25*(this_lambda/20.)**(1./3.)
         this_theta_c = this_rc_mpc/dang[i]
         tau.append(this_tau)
         theta_c.append(this_theta_c)
@@ -577,7 +578,8 @@ def do_everything():
     
 
 def load_redmapper(hemi=None):
-    d = fits.open(datadir+'dr8_run_redmapper_v5.10_lgt20_catalog.fit')[1].data
+    #d = fits.open(datadir+'dr8_run_redmapper_v5.10_lgt20_catalog.fit')[1].data
+    d = fits.open(datadir+'dr8_run_redmapper_v5.10_lgt5_catalog.fit')[1].data  
 
     # if desired, use only one hemisphere.
     if (hemi!=None):
