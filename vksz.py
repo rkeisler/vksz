@@ -27,7 +27,7 @@ def main(hemi='south'):
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
-    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_smica4000.pkl','w'))
+    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_mb_cl31.pkl','w'))
     ipdb.set_trace()
 
 
@@ -37,12 +37,12 @@ def cross_template_with_planck(template, nrandom=0):
     mask_factor = np.mean(mask**2.)
 
     # get planck beam
-    bl, l_bl = load_planck_bl()
+    bl, l_bl = load_planck_bl('mb')
     l_bl = l_bl[0:lmax+1]
     bl = bl[0:lmax+1]
 
     # get CL_PLANCK_THEORY
-    l_planck, cl_planck = get_cl_theory()
+    l_planck, cl_planck = get_cl_theory('mb')
     # store a version of the biased, beam-convolved spectrum.
     cl_planck_biased = cl_planck.copy()
     # "unbias" this spectrum, i.e. correct for Planck beam
@@ -62,7 +62,7 @@ def cross_template_with_planck(template, nrandom=0):
     if (nrandom==0):
         print ' '
         print 'data'
-        planck = load_planck_data()
+        planck = load_planck_data('mb')
         cl_template_planck = hp.anafast(template*mask, map2=planck*mask, lmax=lmax)/mask_factor
         # correct by one power of planck beam function
         cl_template_planck /= bl
@@ -96,14 +96,18 @@ def cross_template_with_planck(template, nrandom=0):
     return amps
 
 
-def load_planck_data():
+def load_planck_data(band):
     '''
     #tmpp, need to add these to download functions.
     planck = fits.open(datadir+'HFI_SkyMap_217_2048_R1.10_nominal.fits')[1].data['I_STOKES']
     #planck = fits.open(datadir+'HFI_SkyMap_143_2048_R1.10_nominal.fits')[1].data['I_STOKES']
     '''
+    '''
     planck = fits.open(datadir+'COM_CompMap_CMB-smica_2048_R1.20.fits')[1].data['I']
-    planck *= (1e-6) # convert from uK to K
+    planck *= (1e-6) # convert from uK to K, SMICA only
+    '''
+    if band=='mb': return make_multiband_map(quick=True)
+    planck = fits.open(datadir+'HFI_SkyMap_%i_2048_R1.10_nominal.fits'%band)[1].data['I_STOKES']    
     planck = hp.reorder(planck, n2r=True)
     planck[planck<(-1000e-6)]=0.
     planck[planck>(+1000e-6)]=0.    
@@ -115,26 +119,32 @@ def load_planck_mask():
     gmask = fits.open(datadir+'HFI_Mask_GalPlane_2048_R1.10.fits')[1].data['GAL060']#tmpp, 40 vs 60%?
     pmask = np.ones_like(gmask, dtype=np.float)
     tmp = fits.open(datadir+'HFI_Mask_PointSrc_2048_R1.10.fits')[1].data
-    #for band in [100, 143, 217]:
-    for band in [217]:        #tmpp
+    for band in [100, 143, 217]:
+    #for band in [217]:        #tmpp
         pmask *= tmp['F%i_05'%band]
     mask = gmask*pmask
+    #mask = fits.open(datadir+'COM_CompMap_CMB-smica_2048_R1.20.fits')[1].data['VALMASK'] # tmpp, could try I_MASK
     '''
-    mask = fits.open(datadir+'COM_CompMap_CMB-smica_2048_R1.20.fits')[1].data['VALMASK'] # tmpp, could try I_MASK
+    #mask = fits.open(datadir+'COM_Mask_Likelihood_2048_R1.10.fits')[1].data['CL49']
+    #mask = fits.open(datadir+'COM_Mask_Likelihood_2048_R1.10.fits')[1].data['CL39']    
+    mask = fits.open(datadir+'COM_Mask_Likelihood_2048_R1.10.fits')[1].data['CL31']    
     mask = hp.reorder(mask, n2r=True)    
     return mask
 
 
 
-def load_planck_bl():
-    '''
+def load_planck_bl(band):
     # tmpp, need to add these to download functions.
-    x=np.loadtxt(datadir+'HFI_RIMO_R1.10.BEAMWF_%iX%i.txt'%(band,band))
-    bl = x[:, 0]
-    l_bl = np.arange(len(bl))    
-    '''
-    bl = fits.open(datadir+'COM_CompMap_CMB-smica_2048_R1.20.fits')[4].data['beam_wf']
-    l_bl = np.arange(len(bl))
+    if band=='mb':
+        fwhm_arcmin = 4.85
+        sigma_rad = fwhm_arcmin/60.*np.pi/180./2.355
+        l_bl = np.arange(lmax+1)        
+        bl = np.exp(-0.5*l_bl*(l_bl+1.)*sigma_rad**2.)
+    else:
+        x=np.loadtxt(datadir+'HFI_RIMO_R1.10.BEAMWF_%iX%i.txt'%(band,band))
+        bl = x[:, 0]
+        #bl = fits.open(datadir+'COM_CompMap_CMB-smica_2048_R1.20.fits')[4].data['beam_wf']
+        l_bl = np.arange(len(bl))
     return bl, l_bl
 
     
@@ -207,8 +217,7 @@ def fill_free_electron_parameters(rm, tau20=0.001):
     theta_c = np.array(theta_c)
     rm['tau'] = tau
     rm['theta_c'] = theta_c
-    #t0 = -(rm['vlos']/constants.c_light_Mpc_s)*TCMB*rm['tau']
-    t0 = -(rm['vlos'])*TCMB*rm['tau']    #tmpp!
+    t0 = -(rm['vlos']/constants.c_light_Mpc_s)*TCMB*rm['tau']
     rm['t0'] = t0
     return
         
@@ -615,55 +624,48 @@ def make_cl_planck_data():
     pickle.dump((l_planck, cl_planck), open(savename,'w'))
     
     
-def get_cl_theory(compare_to_data=False):
-    # this is the *biased* spectrum.
-    # i.e. it has not been corrected by planck beam.
+def get_cl_theory(band):
+
+    # C31 mask
+    d3000_clustered = {100:0., 143:32., 217:50., 'mb':0.}  
+    d3000_poisson = {100:220., 143:75., 217:60., 'mb':0.}
+    uk_arcmin_noise = {100:100., 143:45., 217:63., 'mb':55.}
+    
+    cl_theory = np.zeros(lmax+1)
+    # load CMB
     tmp = np.loadtxt(datadir+'planck2013_TableIICol4_lensedCls.dat')
     l_theory = np.concatenate([np.array([0,1]),tmp[:,0]])
-    dl_tt_theory = np.concatenate([np.array([0.,0.]), tmp[:,1]/1e12])
+    dl_cmb = np.concatenate([np.array([0.,0.]), tmp[:,1]/1e12])
+    l_theory = l_theory[0:lmax+1]
+    dl_cmb = dl_cmb[0:lmax+1]    
+    cl_cmb = dl_cmb/l_theory/(l_theory+1.)*2.*np.pi
+    cl_cmb[0] = 0.
+    cl_theory += cl_cmb
 
-    # add poisson
-    #uk_arcmin_poisson = 80.
-    uk_arcmin_poisson = 0.    
-    cl_poisson = (uk_arcmin_poisson * 1./60.*np.pi/180.)**2. / 1e12
-    dl_poisson = cl_poisson*l_theory*(l_theory+1.)/2./np.pi
-    dl_tt_theory += dl_poisson
+    # Poisson
+    this_d3000_poisson = d3000_poisson[band]
+    cl_poisson = this_d3000_poisson/3000./3001.*2.*np.pi / 1e12
+    cl_theory += cl_poisson
+
+    # Clustered
+    this_dl_clustered = d3000_clustered[band]*(l_theory/3000.)**(0.6)/1e12
+    cl_clustered = this_dl_clustered/l_theory/(l_theory+1.)*2.*np.pi
+    cl_clustered[0] = 0.
+    cl_theory += cl_clustered
     
     # multiply sky power by planck beam
-    bl, l_bl = load_planck_bl()
+    bl, l_bl = load_planck_bl(band)
     assert np.min(l_theory)==np.min(l_bl)
-    l_theory = l_bl
-    dl_tt_theory = dl_tt_theory[0:len(l_theory)]
-    dl_tt_theory *= (bl**2.)
-
+    assert len(l_theory)==len(l_bl)
+    cl_theory *= (bl**2.)
+        
     # add white noise
-    #uk_arcmin_noise = 62.
-    uk_arcmin_noise = 58.
-    cl_noise = (uk_arcmin_noise * 1./60.*np.pi/180.)**2. / 1e12
-    dl_noise = cl_noise*l_theory*(l_theory+1.)/2./np.pi
-    dl_tt_theory += dl_noise
-    cl_tt_theory = dl_tt_theory/l_theory/(l_theory+1.)*2.*np.pi
-    cl_tt_theory[0] = 0.
-
-    if compare_to_data:
-        # you may want to remake this pkl file first using
-        # make_cl_planck_data()
-        '''
-        l, cl = pickle.load(open(datadir+'cl_planck_217.pkl','r'))
-        dl_planck = cl*l*(l+1.)/2./np.pi
-        '''
-        mask = load_planck_mask()
-        mask_factor = np.mean(mask**2.)        
-        planck = load_planck_data()
-        cl_planck = hp.anafast(planck*mask, lmax=lmax)/mask_factor
-        l_planck = np.arange(len(cl_planck))
-        dl_planck = cl_planck*l_planck*(l_planck+1.)/2./np.pi
-        pl.clf()
-        pl.plot(l_theory, dl_planck/dl_tt_theory)
-        pl.ylim(.8, 1.2)
-        ipdb.set_trace()
+    this_uk_arcmin_noise = uk_arcmin_noise[band]
+    cl_noise = (this_uk_arcmin_noise * 1./60.*np.pi/180.)**2. / 1e12
+    cl_theory += cl_noise
     
-    return l_theory, cl_tt_theory
+    return l_theory, cl_theory    
+            
 
 
 def toy_test_real_vs_harmonic(amp=100., nside=2**5, nexp=1000):
@@ -854,59 +856,108 @@ def dot_los(this_pos, these_pos):
     
 def study_multiband_planck(quick=True):
     savename = datadir+'cl_multiband.pkl'
-    bands = [100, 143, 217]    
+    bands = [100, 143, 217, 'mb']
     if quick: cl = pickle.load(open(savename,'r'))
     else:
         cl = {}
         mask = load_planck_mask()
         mask_factor = np.mean(mask**2.)
         for band in bands:
-            this_map = fits.open(datadir+'HFI_SkyMap_%i_2048_R1.10_nominal.fits'%band)[1].data['I_STOKES']
-            this_map = hp.reorder(this_map, n2r=True)
-            this_map[this_map<(-1000e-6)]=0.
-            this_map[this_map>(+1000e-6)]=0.    
+            this_map = load_planck_data(band)
             this_cl = hp.anafast(this_map*mask, lmax=lmax)/mask_factor
             cl[band] = this_cl
         pickle.dump(cl, open(savename,'w'))
 
 
-    uk_arcmin_poisson = {100:80., 143:100., 217:80.}
-    uk_arcmin_noise = {100:70., 143:40., 217:62.}
     cl_theory = {}
-    tmp = np.loadtxt(datadir+'planck2013_TableIICol4_lensedCls.dat')
-    l_theory = np.concatenate([np.array([0,1]),tmp[:,0]])
-    dl_cmb_theory = np.concatenate([np.array([0.,0.]), tmp[:,1]/1e12])
-    cl_cmb_theory = dl_cmb_theory/l_theory/(l_theory+1.)*2.*np.pi
-    cl_cmb_theory[0] = 0.
-
     pl.clf()
+    
     for band in bands:
-        # get sky power, which is CMB + Poisson
-        # CMB
-        cl_theory[band] = cl_cmb_theory
-        # Poisson
-        this_uk_arcmin_poisson = uk_arcmin_poisson[band]
-        cl_poisson = (this_uk_arcmin_poisson * 1./60.*np.pi/180.)**2. / 1e12
-        cl_theory[band] += cl_poisson
-    
-        # multiply sky power by planck beam
-        bl, l_bl = load_planck_bl(band)
-        assert np.min(l_theory)==np.min(l_bl)
-        l_theory = l_bl
-        cl_theory[band] = cl_theory[band][0:len(l_theory)]
-        cl_theory[band] *= (bl**2.)
-        
-        # add white noise
-        this_uk_arcmin_noise = uk_arcmin_noise[band]
-        cl_noise = (this_uk_arcmin_noise * 1./60.*np.pi/180.)**2. / 1e12
-        cl_theory[band] += cl_noise
-
+        l_theory, cl_theory[band] = get_cl_theory(band)
         this_cl = cl[band]
-        this_cl_theory = cl_theory[band][0:len(this_cl)]
-        pl.plot(this_cl/this_cl_theory)
+        pl.plot(this_cl/cl_theory[band])
+        
     pl.legend(bands)
-    pl.plot([0,3000],[1,1],'k--')
-    pl.ylim(.5,2.)
+    pl.plot([0,4000],[1,1],'k--')
+    pl.ylim(.7,1.3)
+    pl.ylabel('data/theory')
+
     
-    ipdb.set_trace()
-    return planck    
+
+def make_multiband_map(quick=True):
+    savename = datadir+'map_mb.pkl'
+    if quick: return pickle.load(open(savename,'r'))
+    
+    mask = load_planck_mask()
+    mask_factor = np.mean(mask**2.)    
+    bands=[100, 143, 217]
+
+    # first calculate the band-dependent, ell-dependent weights
+    weight = {}
+    cl_theory = {}
+    total_weight = 0.
+    for band in bands:
+        # load biased, beam-convolved spectrum
+        l_theory, this_cl_theory = get_cl_theory(band)
+        # debias (correct for beam)
+        bl, l_bl = load_planck_bl(band)
+        this_cl_theory /= (bl**2.)
+        cl_theory[band] = this_cl_theory
+        weight[band] = 1./this_cl_theory
+        total_weight += 1./this_cl_theory
+    for k in weight.keys(): weight[k]/=total_weight
+
+    alm_multiband = 0.
+    for band in bands:
+        # load map        
+        this_map = load_planck_data(band)
+        
+        # get alm's
+        this_cl, this_alm = hp.anafast(this_map*mask, lmax=lmax, alm=True)
+        # you might be tempted to correct alm by sqrt(mask_factor), but we're going to
+        # transfer back to map space anyway.  we'll account for the mask later.
+
+        # debias these alm's (i.e. correct for one power of beam)
+        bl, l_bl = load_planck_bl(band)
+        assert len(bl)==(lmax+1)
+        this_alm = hp.sphtfunc.almxfl(this_alm, 1./bl, inplace=False)
+        # multiply by ell-dependent weights
+        this_alm = hp.sphtfunc.almxfl(this_alm, weight[band], inplace=False)
+        alm_multiband += this_alm
+
+    # apply a nominal multi-band beam, which we'll take to be a FWHM=5' gaussian
+    bl_mb, l_bl = load_planck_bl('mb')
+    alm_multiband = hp.sphtfunc.almxfl(alm_multiband, bl_mb, inplace=False)
+    
+    # transfer back to real space
+    map_mb = hp.sphtfunc.alm2map(alm_multiband, nside, lmax=lmax)
+
+    # save
+    pickle.dump(map_mb, open(savename,'w'))
+    return map_mb
+
+
+def view_planck_likelihood_masks():
+    tmp = fits.open(datadir+'COM_Mask_Likelihood_2048_R1.10.fits')[1].data
+    for k in ['CL31','CL39','CL49']:
+        hp.mollview(hp.reorder(tmp[k], n2r=True), title=k)
+
+def compare_unbiased_spectra():
+    bands = [100, 143, 217, 'mb']
+    pl.clf()
+    leg=[]
+
+    l_theory, cl_mb = get_cl_theory('mb')
+    bl, l_bl = load_planck_bl('mb')
+    cl_mb /= (bl**2.)
+    
+    for band in bands:
+        l_theory, this_cl_theory = get_cl_theory(band)
+        bl, l_bl = load_planck_bl(band)
+        this_cl_theory /= (bl**2.)
+        pl.plot(l_theory, this_cl_theory/cl_mb, lw=2)
+        leg.append(band)
+    #pl.ylim(8e-16,1e-14)
+    pl.ylim(.1,2)
+    pl.legend(leg)
+        
