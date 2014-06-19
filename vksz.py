@@ -955,9 +955,10 @@ def compare_unbiased_spectra():
         l_theory, this_cl_theory = get_cl_theory(band)
         bl, l_bl = load_planck_bl(band)
         this_cl_theory /= (bl**2.)
-        pl.plot(l_theory, this_cl_theory/cl_mb, lw=2)
+        #pl.plot(l_theory, this_cl_theory/cl_mb, lw=2)
+        pl.semilogy(l_theory, this_cl_theory, lw=2)        
         leg.append(band)
-    #pl.ylim(8e-16,1e-14)
-    pl.ylim(.1,2)
+    pl.ylim(8e-16,1e-14)
+    #pl.ylim(.1,2)
     pl.legend(leg)
         
