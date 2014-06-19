@@ -27,7 +27,7 @@ def main(hemi='south'):
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
-    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_217_cl39.pkl','w'))
+    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_217_cl39_medrand.pkl','w'))
     ipdb.set_trace()
 
 
@@ -212,9 +212,13 @@ def fill_free_electron_parameters(rm, tau20=0.001):
     dang = distance.angular_diameter_distance(rm['z_spec'], **cosmo)
     for i in range(ncl):
         this_lambda = rm['lam'][i]
-        this_tau = tau20*(this_lambda/20.)**(1./3.)#tmpp, how should it scale w mass?
-        #this_rc_mpc = 0.25 #tmpp.  should scale with some power of lambda.
-        this_rc_mpc = 0.25*(this_lambda/20.)**(1./3.)
+        
+        this_tau = tau20*(this_lambda/20.)#tmpp, how should it scale w mass?        
+        #this_tau = tau20*(this_lambda/20.)**(1./3.)#tmpp, how should it scale w mass?
+        
+        this_rc_mpc = 0.3 #tmpp.  should scale with some power of lambda.
+        #this_rc_mpc = 0.3*(this_lambda/20.)**(1./3.)
+        
         this_theta_c = this_rc_mpc/dang[i]
         tau.append(this_tau)
         theta_c.append(this_theta_c)
@@ -272,9 +276,11 @@ def get_linear_velocities_one_hemi(hemi):
 def vlos_for_hemi(hemi):
     grid = grid3d(hemi=hemi)
     n_data = num_sdss_data_both_catalogs(hemi, grid)
-    n_rand = num_sdss_rand_both_catalogs(hemi, grid)
+    n_rand, weight = num_sdss_rand_both_catalogs(hemi, grid)
+    n_data *= weight
+    n_rand *= weight
     n_rand *= (1.*n_data.sum()/n_rand.sum())
-    delta, weight = num_to_delta(n_data, n_rand)
+    delta = num_to_delta(n_data, n_rand)
     vels = delta_to_vels(delta, weight, grid)
     vlos = vels_to_vel_los_from_observer(vels, grid)
     return vlos, weight, grid
@@ -337,17 +343,46 @@ def num_sdss_data_both_catalogs(hemi, grid):
     return grid.num_from_radecz(d_data['ra'],d_data['dec'], d_data['z'])
 
     
-def num_sdss_rand_both_catalogs(hemi, grid):    
+def num_sdss_rand_both_catalogs_noisy(hemi, grid):    
     d_rand = load_sdss_rand_both_catalogs(hemi)
     return grid.num_from_radecz(d_rand['ra'],d_rand['dec'], d_rand['z'])
+
+def num_sdss_rand_both_catalogs(hemi, grid):
+    d_rand = load_sdss_rand_both_catalogs(hemi)
+    n_noisy = grid.num_from_radecz(d_rand['ra'],d_rand['dec'], d_rand['z'])
+    # get the distance-from-observer 3d grid
+    d_obs = grid.distance_from_observer()
+    d_obs_max = d_obs[n_noisy>0].max()
+    d_obs_1d = np.linspace(0, d_obs_max+1., 100)
+    n_1d = np.zeros_like(d_obs_1d)
+    delta_d_obs = d_obs_1d[1]-d_obs_1d[0]
+    for i,this_d_obs in enumerate(d_obs_1d):
+        wh=np.where((np.abs(d_obs-this_d_obs)<(0.5*delta_d_obs)) & (n_noisy>0))
+        if len(wh[0])==0: continue
+        n_1d[i] = np.median(n_noisy[wh])
+    # now interpolate n_1d onto 3d grid
+    from scipy import interpolate
+    f = interpolate.interp1d(d_obs_1d, n_1d)
+    n_median = np.zeros_like(n_noisy)
+    wh_ok_interp = np.where((d_obs>np.min(d_obs_1d))&(d_obs<np.max(d_obs_1d)))    
+    n_median[wh_ok_interp] = f(d_obs[wh_ok_interp])
+
+    weight = np.zeros_like(n_median)
+    weight[n_noisy>12]=1.
+    n_median *= weight
+    #pl.figure(1); pl.clf(); pl.imshow(n_noisy[:,:,128], vmin=0,vmax=n_median.max()); pl.colorbar()
+    #pl.figure(2); pl.clf(); pl.imshow(n_median[:,:,128], vmin=0,vmax=n_median.max()); pl.colorbar()
+    #ipdb.set_trace()
+    return n_median, weight
 
     
 def num_to_delta(n_data, n_rand, fwhm_sm=1.0, delta_max=3., linear_bias=2.0):
     from scipy.ndimage import gaussian_filter
     sigma_sm = fwhm_sm/2.355
+
     # smooth rand
-    if (fwhm_sm>1.):    
-        n_rand = gaussian_filter(n_rand, sigma_sm)
+    #if (fwhm_sm>1.):    
+    #    n_rand = gaussian_filter(n_rand, sigma_sm)
 
     # smooth data
     # tmpp, replace with a filter that knows about LSS and shot noise.
@@ -358,8 +393,9 @@ def num_to_delta(n_data, n_rand, fwhm_sm=1.0, delta_max=3., linear_bias=2.0):
     delta /= linear_bias
     delta[n_rand==0]=0.
     delta[delta>delta_max]=delta_max
-    weight = n_rand/np.max(n_rand)
-    return delta, weight
+    #weight = n_rand/np.max(n_rand)
+    #return delta, weight
+    return delta
 
     
 class grid3d(object):
@@ -582,8 +618,8 @@ def do_everything():
     
 
 def load_redmapper(hemi=None):
-    #d = fits.open(datadir+'dr8_run_redmapper_v5.10_lgt20_catalog.fit')[1].data
-    d = fits.open(datadir+'dr8_run_redmapper_v5.10_lgt5_catalog.fit')[1].data  
+    d = fits.open(datadir+'dr8_run_redmapper_v5.10_lgt20_catalog.fit')[1].data
+    #d = fits.open(datadir+'dr8_run_redmapper_v5.10_lgt5_catalog.fit')[1].data  
 
     # if desired, use only one hemisphere.
     if (hemi!=None):
