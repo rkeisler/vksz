@@ -27,22 +27,26 @@ def main(hemi='south'):
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
-    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_mb_cl31.pkl','w'))
+    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_217_cl39.pkl','w'))
     ipdb.set_trace()
 
 
 def cross_template_with_planck(template, nrandom=0):
+    #band='mb'
+    band=217
+
+    
     # get mask
     mask = load_planck_mask()
     mask_factor = np.mean(mask**2.)
 
     # get planck beam
-    bl, l_bl = load_planck_bl('mb')
+    bl, l_bl = load_planck_bl(band)
     l_bl = l_bl[0:lmax+1]
     bl = bl[0:lmax+1]
 
     # get CL_PLANCK_THEORY
-    l_planck, cl_planck = get_cl_theory('mb')
+    l_planck, cl_planck = get_cl_theory(band)
     # store a version of the biased, beam-convolved spectrum.
     cl_planck_biased = cl_planck.copy()
     # "unbias" this spectrum, i.e. correct for Planck beam
@@ -62,7 +66,7 @@ def cross_template_with_planck(template, nrandom=0):
     if (nrandom==0):
         print ' '
         print 'data'
-        planck = load_planck_data('mb')
+        planck = load_planck_data(band)
         cl_template_planck = hp.anafast(template*mask, map2=planck*mask, lmax=lmax)/mask_factor
         # correct by one power of planck beam function
         cl_template_planck /= bl
@@ -126,8 +130,8 @@ def load_planck_mask():
     #mask = fits.open(datadir+'COM_CompMap_CMB-smica_2048_R1.20.fits')[1].data['VALMASK'] # tmpp, could try I_MASK
     '''
     #mask = fits.open(datadir+'COM_Mask_Likelihood_2048_R1.10.fits')[1].data['CL49']
-    #mask = fits.open(datadir+'COM_Mask_Likelihood_2048_R1.10.fits')[1].data['CL39']    
-    mask = fits.open(datadir+'COM_Mask_Likelihood_2048_R1.10.fits')[1].data['CL31']    
+    mask = fits.open(datadir+'COM_Mask_Likelihood_2048_R1.10.fits')[1].data['CL39']    
+    #mask = fits.open(datadir+'COM_Mask_Likelihood_2048_R1.10.fits')[1].data['CL31']    
     mask = hp.reorder(mask, n2r=True)    
     return mask
 
@@ -208,7 +212,7 @@ def fill_free_electron_parameters(rm, tau20=0.001):
     dang = distance.angular_diameter_distance(rm['z_spec'], **cosmo)
     for i in range(ncl):
         this_lambda = rm['lam'][i]
-        this_tau = tau20*(this_lambda/20.)#tmpp, how should it scale w mass?
+        this_tau = tau20*(this_lambda/20.)**(1./3.)#tmpp, how should it scale w mass?
         #this_rc_mpc = 0.25 #tmpp.  should scale with some power of lambda.
         this_rc_mpc = 0.25*(this_lambda/20.)**(1./3.)
         this_theta_c = this_rc_mpc/dang[i]
@@ -633,9 +637,14 @@ def make_cl_planck_data():
 def get_cl_theory(band):
 
     # C31 mask
-    d3000_clustered = {100:0., 143:32., 217:50., 'mb':0.}  
-    d3000_poisson = {100:220., 143:75., 217:60., 'mb':0.}
-    uk_arcmin_noise = {100:100., 143:45., 217:63., 'mb':55.}
+    #d3000_clustered = {100:0., 143:32., 217:50., 'mb':0.}  
+    #d3000_poisson = {100:220., 143:75., 217:60., 'mb':0.}
+    #uk_arcmin_noise = {100:100., 143:45., 217:63., 'mb':55.}
+
+    # C39 mask
+    d3000_clustered = {100:0., 143:32., 217:200., 'mb':0.}  
+    d3000_poisson = {100:220., 143:75., 217:50., 'mb':0.}
+    uk_arcmin_noise = {100:110., 143:50., 217:70., 'mb':63.}
     
     cl_theory = np.zeros(lmax+1)
     # load CMB
