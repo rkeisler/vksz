@@ -23,7 +23,7 @@ def main(hemi='south'):
     #print np.corrcoef(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh])[0,1]    
     #ipdb.set_trace()
 
-    rm = get_linear_velocities(quick=True)    
+    rm = get_linear_velocities(quick=False)    
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
@@ -208,7 +208,7 @@ def fill_free_electron_parameters(rm, tau20=0.001):
     dang = distance.angular_diameter_distance(rm['z_spec'], **cosmo)
     for i in range(ncl):
         this_lambda = rm['lam'][i]
-        this_tau = tau20*(this_lambda/20.)
+        this_tau = tau20*(this_lambda/20.)#tmpp, how should it scale w mass?
         #this_rc_mpc = 0.25 #tmpp.  should scale with some power of lambda.
         this_rc_mpc = 0.25*(this_lambda/20.)**(1./3.)
         this_theta_c = this_rc_mpc/dang[i]
@@ -360,7 +360,7 @@ def num_to_delta(n_data, n_rand, fwhm_sm=1.0, delta_max=3., linear_bias=2.0):
     
 class grid3d(object):
     def __init__(self, hemi='south', 
-                 nx=2**8, ny=2**8, nz=2**8, reso_mpc=16., 
+                 nx=2**8, ny=2**8, nz=2**8, reso_mpc=16.0, 
                  #nx=3*2**7, ny=3*2**7, nz=3*2**7, reso_mpc=10.667, 
                  zmin=0.1, zmax=0.55):
         self.hemi = hemi
@@ -587,7 +587,11 @@ def load_redmapper(hemi=None):
         if (hemi.lower()=='south'): wh_hemi=np.where(np.abs(d['ra']-180.)>=100.)[0]
         d = d[wh_hemi]
 
-    wh_zspec = np.where(d['bcg_spec_z']>0)[0]
+    #wh_zspec = np.where(d['bcg_spec_z']>0)[0]
+    # tmpp, the following cut gets only clusters with spec-z's, and within a z range.
+    # this is a manual duplicate of the z-range cut in grid3d, which i don't like.
+    # but if i don't put it here, i get clusters that are outside of my grid3d.
+    wh_zspec = np.where((d['bcg_spec_z']>0.1)&(d['bcg_spec_z']<0.55))[0]
     d = d[wh_zspec]
 
     ra = d['ra']
