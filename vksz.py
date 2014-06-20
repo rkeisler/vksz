@@ -26,7 +26,10 @@ def main(hemi='south', kmax=0.1, rmax=50.):
     '''
 
     rm = get_pairwise_velocities(quick=False, kmax=kmax, rmax=rmax)
-    #rm_linear = get_linear_velocities(quick=True)
+    rm_linear = get_linear_velocities(quick=True)
+    assert(len(rm['weight'])==len(rm_linear['weight']))
+    rm['weight'] = rm_linear['weight']
+
     #wh=np.where(rm_linear['weight']>.2)[0]; pl.clf();
     #pl.plot(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh], '.')
     #pl.title('kmax=%0.2f, rmax=%i'%(kmax, rmax))
