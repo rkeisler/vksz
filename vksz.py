@@ -6,7 +6,7 @@ datadir = 'data/'
 from astropy.io import fits
 import cPickle as pickle
 import healpy as hp
-from cosmolopy import distance, fidcosmo, constants
+from cosmolopy import distance, fidcosmo, constants, perturbation
 cosmo = fidcosmo  #probably want to put in Planck cosmology at some point.
 mpc2km = constants.Mpc_km
 # Unless otherwise noted, distances are in Mpc and velocities are in Mpc/s.
@@ -15,21 +15,28 @@ nside=2**11
 lmax=4000
 
 
-def main(hemi='south'):
+def main(hemi='south', kmax=0.1, rmax=50.):
+    '''
     rm = get_linear_velocities(quick=False)    
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
-    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_217_cl39_medrand.pkl','w'))
+    pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_217_cl39_medrand_32MpcFWHM.pkl','w'))
     ipdb.set_trace()
+    '''
 
-    #rm = get_pairwise_velocities(quick=False)    
+    rm = get_pairwise_velocities(quick=False, kmax=kmax, rmax=rmax)
     #rm_linear = get_linear_velocities(quick=True)
     #wh=np.where(rm_linear['weight']>.2)[0]; pl.clf();
     #pl.plot(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh], '.')
-    #print np.corrcoef(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh])[0,1]    
+    #pl.title('kmax=%0.2f, rmax=%i'%(kmax, rmax))
+    #print np.corrcoef(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh])[0,1] 
     #ipdb.set_trace()
-    
+    template = create_healpix_ksz_template(rm)
+    amp_data = cross_template_with_planck(template, nrandom=0)
+    amp_random = cross_template_with_planck(template, nrandom=100)
+    savename = datadir+'amps_ksz_217_cl39_pairwise_kmax%0.2f_rmax%i.pkl'%(kmax, rmax)
+    pickle.dump((amp_data, amp_random), open(savename,'w'))
 
 
 def cross_template_with_planck(template, nrandom=0):
@@ -252,11 +259,11 @@ def get_linear_velocities(quick=False):
     return rm
 
 
-def get_pairwise_velocities(quick=False):
-    savename = datadir+'get_pairwise_velocities.pkl'
+def get_pairwise_velocities(quick=False, kmax=0.1, rmax=50.):
+    savename = datadir+'get_pairwise_velocities_kmax%0.2f_rmax%i.pkl'%(kmax, rmax)
     if quick: return pickle.load(open(savename,'r'))
-    rm_s = get_pairwise_velocities_one_hemi('south')
-    rm_n = get_pairwise_velocities_one_hemi('north')
+    rm_s = get_pairwise_velocities_one_hemi('south', kmax=kmax, rmax=rmax)
+    rm_n = get_pairwise_velocities_one_hemi('north', kmax=kmax, rmax=rmax)
     rm={}
     for k in rm_s.keys():
         rm[k] = np.hstack([rm_s[k],rm_n[k]])
@@ -377,7 +384,7 @@ def num_sdss_rand_both_catalogs(hemi, grid):
     return n_median, weight
 
     
-def num_to_delta(n_data, n_rand, fwhm_sm=1.2, delta_max=3., linear_bias=2.0):
+def num_to_delta(n_data, n_rand, fwhm_sm=2.0, delta_max=3., linear_bias=2.0):
     from scipy.ndimage import gaussian_filter
     sigma_sm = fwhm_sm/2.355
 
@@ -835,7 +842,7 @@ def study_redmapper_2d():
     ipdb.set_trace()
 
 
-def get_pairwise_velocities_one_hemi(hemi):
+def get_pairwise_velocities_one_hemi(hemi, kmax=0.1, rmax=50.):
     # create 3d grid object
     grid = grid3d(hemi=hemi)
     
@@ -855,9 +862,9 @@ def get_pairwise_velocities_one_hemi(hemi):
     from sklearn.neighbors import KDTree
     tree_sdss = KDTree(pos_sdss, leaf_size=30)
     # find those RM clusters that have some number of LRG's within X Mpc.
-    r_max = 200. # Mpc
-    lrg_counts = tree_sdss.query_radius(pos_rm, r_max, count_only=True)
-    ind, dist = tree_sdss.query_radius(pos_rm, r_max, count_only=False, return_distance=True)    
+    #rmax = 300. # Mpc
+    lrg_counts = tree_sdss.query_radius(pos_rm, rmax, count_only=True)
+    ind, dist = tree_sdss.query_radius(pos_rm, rmax, count_only=False, return_distance=True)    
     min_counts = np.percentile(lrg_counts, 10)
     #min_counts = 500.
     #wh_use = np.where(lrg_counts>min_counts)[0]
@@ -870,12 +877,25 @@ def get_pairwise_velocities_one_hemi(hemi):
     # loop over RM clusters, get vlos
     ncl = len(rm['ra'])
     vlos = np.zeros(ncl)    
-    r_min = 3.#Mpc, tmpp, worth exploring
-    r_pivot = 10.
-    r_decay = 10.
+    rmin = 5.#Mpc, tmpp, worth exploring
+    #r_pivot = 10.
+    #r_decay = 10.
+
+    redshift_grid = np.arange(0.05, 0.7, 0.01)
+    rfine = np.arange(rmin-1, rmax+1,1.)
+    # create a dictionary containing interpoltor objects, keyed on redshift
+    corr_delta_vel_dict = {}
+    from scipy import interpolate
+    for redshift in redshift_grid:
+        corr_delta_vel_dict[redshift] = interpolate.interp1d(rfine, corr_delta_vel(rfine, z=redshift, kmax=kmax))
+
+
+    #distance_weight = 
+    print '*********** using kmax=%0.2f, rmax=%i'%(kmax, rmax)
     for i in range(ncl):
+        print i,ncl
         if (lrg_counts[i]<min_counts): continue
-        wh_not_too_close = np.where(dist[i]>r_min)[0]        
+        wh_not_too_close = np.where(dist[i]>rmin)[0]        
         these_dist = dist[i][wh_not_too_close]
         these_ind = ind[i][wh_not_too_close]
         # get 3d positions
@@ -884,10 +904,19 @@ def get_pairwise_velocities_one_hemi(hemi):
 
         # dot with line of sight
         these_dot_los = dot_los(this_pos_rm, these_pos_sdss)
-        these_vel = np.exp(-(these_dist-r_pivot)/r_decay)
+        this_redshift = rm['z_spec'][i]
+        closest_redshift = redshift_grid[np.argmin(np.abs(redshift_grid-this_redshift))]
+        this_corr_delta_vel = corr_delta_vel_dict[closest_redshift]
+        these_vel = this_corr_delta_vel(these_dist)
+        #ipdb.set_trace()
+        #these_vel = corr_delta_vel(these_dist, z=this_redshift, kmax=kmax)
+        #these_vel = np.exp(-(these_dist-r_pivot)/r_decay)
         #these_vel = np.exp(-0.5*(these_dist/r_decay)**2.)
         these_vlos = these_vel*these_dot_los
         this_vlos = np.sum(these_vlos) #tmpp, sum or mean?
+        #indsort=np.argsort(these_dist)
+        #pl.clf(); pl.plot(these_dist[indsort], np.cumsum(these_vlos[indsort]),'.')
+        #ipdb.set_trace()
         vlos[i] = this_vlos
     rm['vlos'] = vlos
     rm['weight'] = np.ones(ncl)
@@ -1028,6 +1057,71 @@ def plot_optimal_delta_filter():
     pl.clf(); pl.plot(k, w)
     reso_mpc = 16.
     fwhm = 1.2*reso_mpc
+    ipdb.set_trace()
+
+def study_sdss_density(hemi='south'):
+    grid = grid3d(hemi=hemi)
+    n_data = num_sdss_data_both_catalogs(hemi, grid)
+    n_rand, weight = num_sdss_rand_both_catalogs(hemi, grid)
+    n_rand *= ((n_data*weight).sum() / (n_rand*weight).sum())
+    delta = (n_data - n_rand) / n_rand
+    delta[weight==0]=0.
+    fdelta = np.fft.fftn(delta*weight)
+    power = np.abs(fdelta)**2.
+    ks = get_wavenumbers(delta.shape, grid.reso_mpc)
+    kmag = ks[3]
+    kbin = np.arange(0,0.06,0.002)
+    ind = np.digitize(kmag.ravel(), kbin)
+    power_ravel = power.ravel()
+    power_bin = np.zeros_like(kbin)
+    for i in range(len(kbin)):
+        print i
+        wh = np.where(ind==i)[0]
+        power_bin[i] = power_ravel[wh].mean()
+    #pl.clf()
+    #pl.plot(kbin, power_bin)
+    from cosmolopy import perturbation
+    pk = perturbation.power_spectrum(kbin, 0.4, **cosmo)
+    pl.clf(); pl.plot(kbin, power_bin/pk, 'b')
+    pl.plot(kbin, power_bin/pk, 'bo')    
+    pl.xlabel('k (1/Mpc)',fontsize=16)
+    pl.ylabel('P(k) ratio, DATA/THEORY [arb. norm.]',fontsize=16)
+    ipdb.set_trace()
+
 
     
-    ipdb.set_trace()
+def spherical_bessel_j1(x):
+    return np.sin(x)/x**2. - np.cos(x)/x
+
+
+def corr_delta_vel(r, z=0.4, kmin=1e-3, kmax=0.2):
+    # r is in Mpc
+    a = 1./(1.+z)
+    hz = distance.hubble_z(z, **cosmo)
+    fgrowth = perturbation.fgrowth(z, cosmo['omega_M_0'])
+    k = np.arange(kmin,kmax,kmin)
+    dk = k[1]-k[0]
+    corr = []
+    pk = perturbation.power_spectrum(k, z, **cosmo)
+    for this_r in r:
+        this_corr = a*hz*fgrowth/2./np.pi**2. * np.sum(dk*k*pk*spherical_bessel_j1(k*this_r))
+        corr.append(this_corr)
+    return np.array(corr)
+
+def plot_many_corr_delta_vel():
+    pl.clf()
+    leg = []
+    for kmax in [0.05, 0.1, 0.2, 0.5, 1., 2., 5.]:
+        plot_corr_delta_vel(kmin=1e-3, kmax=kmax, doclf=False)
+        leg.append('kmax=%0.2f'%kmax)
+    pl.legend(leg)
+
+def plot_corr_delta_vel(kmin=1e-3, kmax=0.2, doclf=True):
+    r = np.arange(1.,200,1)
+    corr = corr_delta_vel(r, kmin=kmin, kmax=kmax)
+    #corr /= np.max(corr)    
+    if doclf: pl.clf()
+    pl.plot(r, corr)
+    fs = 18
+    pl.xlabel('r (Mpc)', fontsize=fs-2)
+    pl.ylabel(r'$\xi_{\delta v}(r)$', fontsize=fs)
