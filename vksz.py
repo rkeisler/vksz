@@ -16,19 +16,20 @@ lmax=4000
 
 
 def main(hemi='south'):
-    #rm = get_pairwise_velocities(quick=False)    
-    #rm_linear = get_linear_velocities(quick=True)
-    #wh=np.where(rm_linear['weight']>.2)[0]; pl.clf();
-    #pl.plot(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh], '.')
-    #print np.corrcoef(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh])[0,1]    
-    #ipdb.set_trace()
-
     rm = get_linear_velocities(quick=False)    
     template = create_healpix_ksz_template(rm)
     amp_data = cross_template_with_planck(template, nrandom=0)
     amp_random = cross_template_with_planck(template, nrandom=100)
     pickle.dump((amp_data, amp_random), open(datadir+'amps_ksz_217_cl39_medrand.pkl','w'))
     ipdb.set_trace()
+
+    #rm = get_pairwise_velocities(quick=False)    
+    #rm_linear = get_linear_velocities(quick=True)
+    #wh=np.where(rm_linear['weight']>.2)[0]; pl.clf();
+    #pl.plot(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh], '.')
+    #print np.corrcoef(rm['vlos'][wh], (rm_linear['vlos']/rm['weight'])[wh])[0,1]    
+    #ipdb.set_trace()
+    
 
 
 def cross_template_with_planck(template, nrandom=0):
@@ -233,8 +234,8 @@ def fill_free_electron_parameters(rm, tau20=0.001):
 
     
 def show_vlos(hemi='south'):
-    vlos = vlos_for_hemi(hemi)
-    pl.clf(); pl.imshow(vlos[:,:,128]*mpc2km,vmin=-200,vmax=200)
+    vlos, weight, grid = vlos_for_hemi(hemi)
+    pl.clf(); pl.imshow(vlos[:,:,128]*mpc2km,vmin=-500,vmax=500)
     pl.colorbar()
     pl.title(hemi+', LOS velocities (km/s)')
 
@@ -376,7 +377,7 @@ def num_sdss_rand_both_catalogs(hemi, grid):
     return n_median, weight
 
     
-def num_to_delta(n_data, n_rand, fwhm_sm=1.0, delta_max=3., linear_bias=2.0):
+def num_to_delta(n_data, n_rand, fwhm_sm=1.2, delta_max=3., linear_bias=2.0):
     from scipy.ndimage import gaussian_filter
     sigma_sm = fwhm_sm/2.355
 
@@ -1013,3 +1014,20 @@ def compare_unbiased_spectra():
     #pl.ylim(.1,2)
     pl.legend(leg)
         
+
+def plot_optimal_delta_filter():
+    # see Ho&Spergel 0903.2845
+    #nbar = 3e-4 / (0.7**3.)
+    nbar = 3e-4 / (0.7**3.) / 10.    
+    k = np.arange(1e-3,1,1e-3)
+    zmean = 0.3
+    from cosmolopy import perturbation
+    pk = perturbation.power_spectrum(k, zmean, **cosmo)
+    bias = 2.0
+    w = pk*bias**2. / (pk*bias**2. + 1./nbar)
+    pl.clf(); pl.plot(k, w)
+    reso_mpc = 16.
+    fwhm = 1.2*reso_mpc
+
+    
+    ipdb.set_trace()
