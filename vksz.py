@@ -36,14 +36,25 @@ def try_corr_2d_2pt(hemi='south'):
     rd = counts_2d_2pt(True, False, hemi, quick=quick)
     dr = counts_2d_2pt(False, True, hemi, quick=quick)
     rr = counts_2d_2pt(True, True, hemi, quick=quick)
-    corr = (dd - rd - dr + rr)/rr
-    corr = corr[:,1:]
-    logcorr = np.log10(np.abs(corr))
-    
+    pl.figure(1, figsize=(17.4, 5.6))
     pl.clf()
-    pl.imshow(np.hstack([logcorr[:, ::-1], logcorr]), vmin=-3,vmax=2)
-    pl.colorbar()
-    ipdb.set_trace()
+    for i in range(3):
+        print i
+        corr = (dd[i] - rd[i] - dr[i] + rr[i])/rr[i]
+        corr = corr[:,1:]
+        mircorr = np.hstack([corr[:, ::-1], corr])
+        logcorr = np.log10(mircorr)
+        pl.subplot(1,3,i+1)
+        #pl.xticks([0,50,99],['-100','0','+100'])
+        #pl.yticks([0,50,99],['-100','0','+100'])        
+        #pl.imshow(mircorr, vmin=-1,vmax=1)
+        r=20
+        #pl.imshow(logcorr[50-r:50+r, 50-r:50+r], vmin=-3,vmax=1.5)
+        pl.imshow(logcorr, vmin=-3,vmax=1.5)        
+        #pl.plot(logcorr[:,logcorr.shape[1]/2.])
+        #pl.plot(logcorr[logcorr.shape[0]/2.,:])        
+        #pl.colorbar()
+    #ipdb.set_trace()
 
     
 def counts_2d_2pt(randoms_sdss, randoms_rm, hemi, quick=True):
@@ -68,7 +79,7 @@ def get_lambda_bin(lam):
     return output
 
 
-def counts_2d_2pt_from_pos(pos_sdss, pos_rm, lam, rmax=100., reso=2.):
+def counts_2d_2pt_from_pos(pos_sdss, pos_rm, lam, rmax=220., reso=2.):
     # preliminaries
     nsdss = pos_sdss.shape[0]
     nrm = pos_rm.shape[0]
