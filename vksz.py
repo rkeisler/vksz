@@ -100,7 +100,7 @@ def counts_2d_2pt_from_pos(pos_sdss, pos_rm, lam, rmax=220., reso=2.):
 
     # find all BOSS galaxies within "rmax" Mpc of each RM clusters.
     print '...querying tree...'
-    ind, dist = tree_sdss.query_radius(pos_rm, rmax, count_only=False, return_distance=True)
+    #ind, dist = tree_sdss.query_radius(pos_rm, rmax, count_only=False, return_distance=True)
     print '...done querying tree...'
 
     # loop over clusters, calculate (r_pi, r_sigma) for all nearby BOSS galaxies
@@ -108,11 +108,14 @@ def counts_2d_2pt_from_pos(pos_sdss, pos_rm, lam, rmax=220., reso=2.):
     counts_rpi_rsigma = [np.zeros((nrpigrid+1, nrsigmagrid+1), dtype=np.float) for i in range(n_lam_bin)]
     for irm in range(nrm):
         print '%i/%i'%(irm, nrm)
-        these_ind = ind[irm]
+        #these_ind = ind[irm]
+        these_ind, these_s = tree_sdss.query_radius(pos_rm[irm,:], rmax, count_only=False, return_distance=True)
+        these_ind = these_ind[0]
+        these_s = these_s[0]
         if len(these_ind)==0: continue
         this_pos_rm = pos_rm[irm, :]
         these_pos_sdss = pos_sdss[these_ind, :]
-        these_s = dist[irm]
+        #these_s = dist[irm]
         these_mu = dot_los2(this_pos_rm, these_pos_sdss)
         these_rpi = these_s*these_mu
         these_rsigma = these_s*np.sqrt((1.-these_mu**2.))
