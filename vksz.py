@@ -15,6 +15,137 @@ nside=2**11
 lmax=4000
 
 
+def make_many_corr():
+    hemi='south'
+    dd = counts_2d_2pt(False, False, hemi, quick=False)
+    rd = counts_2d_2pt(True, False, hemi, quick=False)
+    dr = counts_2d_2pt(False, True, hemi, quick=False)
+    rr = counts_2d_2pt(True, True, hemi, quick=False)
+
+    hemi='north'
+    dd = counts_2d_2pt(False, False, hemi, quick=False)
+    rd = counts_2d_2pt(True, False, hemi, quick=False)
+    dr = counts_2d_2pt(False, True, hemi, quick=False)
+    rr = counts_2d_2pt(True, True, hemi, quick=False)
+
+
+    
+def try_corr_2d_2pt(hemi='south'):
+    quick=True
+    dd = counts_2d_2pt(False, False, hemi, quick=quick)
+    rd = counts_2d_2pt(True, False, hemi, quick=quick)
+    dr = counts_2d_2pt(False, True, hemi, quick=quick)
+    rr = counts_2d_2pt(True, True, hemi, quick=quick)
+    corr = (dd - rd - dr + rr)/rr
+    corr = corr[:,1:]
+    logcorr = np.log10(np.abs(corr))
+    
+    pl.clf()
+    pl.imshow(np.hstack([logcorr[:, ::-1], logcorr]), vmin=-3,vmax=2)
+    pl.colorbar()
+    ipdb.set_trace()
+
+    
+def counts_2d_2pt(randoms_sdss, randoms_rm, hemi, quick=True):
+    letters = ['D','R']
+    savename = datadir + 'counts_2d_2pt_%s_%s%s.pkl'%(hemi, letters[randoms_sdss], letters[randoms_rm])
+    if quick: return pickle.load(open(savename,'r'))
+    print '...getting SDSS...'
+    pos_sdss = get_pos_sdss(hemi, randoms=randoms_sdss)
+    print '...getting RM...'
+    pos_rm = get_pos_rm(hemi, randoms=randoms_rm)
+    lam = load_redmapper(hemi=hemi)['lam']
+    counts = counts_2d_2pt_from_pos(pos_sdss, pos_rm, lam)
+    pickle.dump(counts, open(savename,'w'))
+    return counts
+
+
+def get_lambda_bin(lam):
+    output = np.zeros_like(lam, dtype=int)
+    output[np.where( (lam>=20.) & (lam<30.)  )[0]] = 0
+    output[np.where( (lam>=30.) & (lam<40.)  )[0]] = 1
+    output[np.where( (lam>=40.) & (lam<999.) )[0]] = 2
+    return output
+
+
+def counts_2d_2pt_from_pos(pos_sdss, pos_rm, lam, rmax=100., reso=2.):
+    # preliminaries
+    nsdss = pos_sdss.shape[0]
+    nrm = pos_rm.shape[0]
+
+    # figure out which lambda bins each RM cluster goes into
+    lam_bin = get_lambda_bin(lam)
+    n_lam_bin = len(set(lam_bin))    
+    
+    # build a couple of KDTree's, one for SDSS, one for RM.
+    from sklearn.neighbors import KDTree
+    tree_sdss = KDTree(pos_sdss, leaf_size=30)
+
+    # define grids for r_pi and r_sigma.
+    rpigrid = np.arange(-rmax, rmax, reso)
+    nrpigrid = len(rpigrid)
+    rsigmagrid = np.arange(0, rmax, reso)
+    nrsigmagrid = len(rsigmagrid)
+
+    # find all BOSS galaxies within "rmax" Mpc of each RM clusters.
+    print '...querying tree...'
+    ind, dist = tree_sdss.query_radius(pos_rm, rmax, count_only=False, return_distance=True)
+    print '...done querying tree...'
+
+    # loop over clusters, calculate (r_pi, r_sigma) for all nearby BOSS galaxies
+    # bin those counts.
+    counts_rpi_rsigma = [np.zeros((nrpigrid+1, nrsigmagrid+1), dtype=np.float) for i in range(n_lam_bin)]
+    for irm in range(nrm):
+        print '%i/%i'%(irm, nrm)
+        these_ind = ind[irm]
+        if len(these_ind)==0: continue
+        this_pos_rm = pos_rm[irm, :]
+        these_pos_sdss = pos_sdss[these_ind, :]
+        these_s = dist[irm]
+        these_mu = dot_los2(this_pos_rm, these_pos_sdss)
+        these_rpi = these_s*these_mu
+        these_rsigma = these_s*np.sqrt((1.-these_mu**2.))
+        ind_rpi = np.digitize(these_rpi, rpigrid)
+        ind_rsigma = np.digitize(these_rsigma, rsigmagrid)
+        this_lam_bin = lam_bin[irm]
+        for this_ind_rpi, this_ind_rsigma in zip(ind_rpi, ind_rsigma):
+                counts_rpi_rsigma[this_lam_bin][this_ind_rpi, this_ind_rsigma] += 1.
+
+    # normalize
+    # ok, really you'd want to normalize by nrm *per lambda bin*,
+    # but i don't think it will make any material difference.
+    for i in range(n_lam_bin): counts_rpi_rsigma[i] *= (1./nrm/nsdss)
+    return counts_rpi_rsigma
+
+
+def get_pos_sdss(hemi, randoms=False):
+    if randoms: sdss = load_sdss_rand_both_catalogs(hemi)
+    else: sdss = load_sdss_data_both_catalogs(hemi)
+    grid = grid3d(hemi=hemi)        
+    x_sdss, y_sdss, z_sdss = grid.xyz_from_radecz(sdss['ra'], sdss['dec'], sdss['z'], applyzcut=False)    
+    pos_sdss = np.vstack([x_sdss, y_sdss, z_sdss]).T
+    return pos_sdss
+
+
+def get_pos_rm(hemi, randoms=False):
+    # load redmapper catalog
+    rm = load_redmapper(hemi=hemi)
+    if randoms:
+        # randomize redshifts
+        ncl = len(rm['ra'])
+        z_spec_orig = rm['z_spec'].copy()
+        np.random.shuffle(rm['z_spec'])
+        wh = np.where(rm['z_spec']==z_spec_orig)[0]
+        rm['z_spec'][wh] = np.roll(rm['z_spec'],1000)[wh]
+    # get XYZ positions (Mpc) of both datasets
+    grid = grid3d(hemi=hemi)            
+    x_rm, y_rm, z_rm = grid.xyz_from_radecz(rm['ra'], rm['dec'], rm['z_spec'], applyzcut=False)
+    pos_rm = np.vstack([x_rm, y_rm, z_rm]).T
+    return pos_rm
+
+
+
+
 def main(hemi='south', kmax=0.1, rmax=50.):
     '''
     rm = get_linear_velocities(quick=False)    
@@ -932,6 +1063,18 @@ def dot_los(this_pos, these_pos):
     # from definition given in Keisler&Schmidt.
     # should be very similar, but need to check.
     r_avg = 0.5*(this_pos+these_pos) 
+    r_diff_hat = r_diff / np.sqrt((r_diff**2.).sum(1))[:, np.newaxis]
+    r_avg_hat = r_avg / np.sqrt((r_avg**2.).sum(1))[:, np.newaxis]
+    these_dot_los = (r_diff_hat*r_avg_hat).sum(1)
+    return these_dot_los
+
+
+def dot_los2(this_pos, these_pos):
+    r_diff = these_pos-this_pos
+    #tmpp, note that the following differs slightly
+    # from definition given in Keisler&Schmidt.
+    # should be very similar, but need to check.
+    r_avg = this_pos[np.newaxis,:]
     r_diff_hat = r_diff / np.sqrt((r_diff**2.).sum(1))[:, np.newaxis]
     r_avg_hat = r_avg / np.sqrt((r_avg**2.).sum(1))[:, np.newaxis]
     these_dot_los = (r_diff_hat*r_avg_hat).sum(1)
