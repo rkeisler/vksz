@@ -15,6 +15,41 @@ nside=2**11
 lmax=4000
 
 
+def corr_1d_from_2d(corr, reso=2.):
+    nx, ny = corr.shape
+    x = np.arange(nx)*reso; x -= x.mean()
+    y = np.arange(ny)*reso; y -= y.mean()
+    xx = np.tile(x,ny).reshape(ny,nx).T
+    yy = np.tile(y,nx).reshape(nx,ny)
+    rr = np.sqrt(xx**2. + yy**2.)
+    mask = np.ones_like(rr)
+    mask[np.where(np.abs(yy)<4.)]=0.
+    nbins = 40
+    tmp = np.logspace(np.log10(4.), np.log10(200.), num=nbins+1)
+    rmin = tmp[0:-1]
+    rmax = tmp[1:]
+    rcen = 0.5*(rmin+rmax)
+    corr1d = np.zeros(nbins)
+    for i in range(nbins):
+        wh = np.where((rr>=rmin[i]) & (rr<rmax[i]))
+        corr1d[i] = np.sum((corr*mask)[wh]) / np.sum(mask[wh])
+    return corr1d, rcen
+    
+
+def corr_rm_rm():
+    hemi='north'
+    rm_rm = True
+    dd = counts_2d_2pt(False, False, hemi, quick=False, rm_rm=rm_rm)
+    rd = counts_2d_2pt(True, False, hemi, quick=False, rm_rm=rm_rm)
+    dr = counts_2d_2pt(False, True, hemi, quick=False, rm_rm=rm_rm)
+    rr = counts_2d_2pt(True, True, hemi, quick=False, rm_rm=rm_rm)
+    corr = [0,0,0]
+    for i in range(3):
+        corr[i] = (dd[i] - rd[i] - dr[i] + rr[i])/rr[i]
+        corr[i] = corr[i][:,1:]
+        corr[i] = np.hstack([corr[i][:, ::-1], corr[i]])        
+    return corr
+    
 def make_many_corr():
     hemi='south'
     dd = counts_2d_2pt(False, False, hemi, quick=False)
@@ -27,10 +62,86 @@ def make_many_corr():
     rd = counts_2d_2pt(True, False, hemi, quick=False)
     dr = counts_2d_2pt(False, True, hemi, quick=False)
     rr = counts_2d_2pt(True, True, hemi, quick=False)
-
-
     
-def try_corr_2d_2pt(hemi='south'):
+def make_corr_both_hemi():
+    quick=True
+    dd=[0,0,0]; rd=[0,0,0]; dr=[0,0,0]; rr=[0,0,0]
+    for hemi in ['south','north']:
+        weight = len(load_redmapper(hemi=hemi)['ra'])
+        print weight
+        for i in range(3):
+            dd[i] += (weight*counts_2d_2pt(False, False, hemi, quick=quick)[i])
+            rd[i] += (weight*counts_2d_2pt(True, False, hemi, quick=quick)[i])
+            dr[i] += (weight*counts_2d_2pt(False, True, hemi, quick=quick)[i])
+            rr[i] += (weight*counts_2d_2pt(True, True, hemi, quick=quick)[i])
+    corr = [0,0,0]        
+    for i in range(3): 
+        corr[i] = (dd[i] - rd[i] - dr[i] + rr[i])/rr[i]
+        corr[i] = corr[i][:,1:]
+        corr[i] = np.hstack([corr[i][:, ::-1], corr[i]])        
+    return corr
+
+
+def make_corr1d_fig(dosave=False):
+    corr = make_corr_both_hemi()
+    lw=2; fs=16
+    pl.figure(1)#, figsize=(8, 7))
+    pl.clf()
+    pl.xlim(4,300)
+    pl.ylim(-400,+500)    
+    lambda_titles = [r'$20 < \lambda < 30$',
+                     r'$30 < \lambda < 40$',
+                     r'$\lambda > 40$']
+    colors = ['blue','green','red']
+    for i in range(3):
+        corr1d, rcen = corr_1d_from_2d(corr[i])
+        pl.semilogx(rcen, corr1d*rcen**2, lw=lw, color=colors[i])
+        #pl.semilogx(rcen, corr1d*rcen**2, 'o', lw=lw, color=colors[i])
+    pl.xlabel(r'$s (Mpc)$',fontsize=fs)
+    pl.ylabel(r'$s^2 \xi_0(s)$', fontsize=fs)    
+    pl.legend(lambda_titles, 'lower left', fontsize=fs+3)
+    pl.plot([.1,10000],[0,0],'k--')
+    s_bao = 149.28
+    pl.plot([s_bao, s_bao],[-9e9,+9e9],'k--')
+    pl.text(s_bao*1.03, 420, 'BAO scale')
+    pl.text(s_bao*1.03, 370, '%0.1f Mpc'%s_bao)
+    if dosave: pl.savefig('xi1d_3bin.pdf')
+    
+def make_three_panel_2d_figs():
+    corr = make_corr_both_hemi()
+    show_many_corr(corr, radius_mpc=40., dosave=True)        
+    show_many_corr(corr, radius_mpc=80., dosave=True)
+    show_many_corr(corr, radius_mpc=160., dosave=True)    
+
+def show_many_corr(corr, radius_mpc=80., dosave=False):
+    pl.figure(1, figsize=(17.4, 5.6))
+    pl.clf()
+    lambda_titles = [r'$20 < \lambda < 30$',
+                     r'$30 < \lambda < 40$',
+                     r'$\lambda > 40$']
+    for i in range(3):
+        pl.subplot(1,3,i+1)
+        show_one_corr(corr[i], radius_mpc=radius_mpc, title=lambda_titles[i])
+    if dosave:
+        savename = 'xi2d_3bin_%iMpc.pdf'%(radius_mpc)
+        pl.savefig(savename)
+
+
+        
+def show_one_corr(corr, radius_mpc=80., reso_mpc=2., title=None):
+    nrad = np.ceil(radius_mpc/reso_mpc)
+    nx,ny=corr.shape
+    fs=15
+    corr2show = corr[nx/2-nrad:nx/2+nrad, ny/2-nrad:ny/2+nrad]
+    pl.imshow(np.log10(corr2show),vmin=-3,vmax=1.5,
+              aspect='equal',extent=np.array([-1,1,-1,1])*radius_mpc)
+    pl.ylabel(r'$r_\pi$ (Mpc)', fontsize=fs)
+    pl.xlabel(r'$r_\sigma$ (Mpc)',fontsize=fs)
+    if title!=None: pl.title(title, fontsize=fs)
+                          
+
+def try_corr_2d_2pt():#hemi='south'):
+    
     quick=True
     dd = counts_2d_2pt(False, False, hemi, quick=quick)
     rd = counts_2d_2pt(True, False, hemi, quick=quick)
@@ -57,12 +168,18 @@ def try_corr_2d_2pt(hemi='south'):
     #ipdb.set_trace()
 
     
-def counts_2d_2pt(randoms_sdss, randoms_rm, hemi, quick=True):
+def counts_2d_2pt(randoms_sdss, randoms_rm, hemi, quick=True, rm_rm=False):
     letters = ['D','R']
-    savename = datadir + 'counts_2d_2pt_%s_%s%s.pkl'%(hemi, letters[randoms_sdss], letters[randoms_rm])
+
+    savename = datadir + 'counts_2d_2pt_%s_%s%s'%(hemi, letters[randoms_sdss], letters[randoms_rm])
+    if rm_rm: savename += '_rm_rm'
+    savename += '.pkl'
+    
     if quick: return pickle.load(open(savename,'r'))
     print '...getting SDSS...'
-    pos_sdss = get_pos_sdss(hemi, randoms=randoms_sdss)
+    if (rm_rm): pos_sdss = get_pos_rm(hemi, randoms=randoms_rm)
+    else: pos_sdss = get_pos_sdss(hemi, randoms=randoms_sdss)
+        
     print '...getting RM...'
     pos_rm = get_pos_rm(hemi, randoms=randoms_rm)
     lam = load_redmapper(hemi=hemi)['lam']
