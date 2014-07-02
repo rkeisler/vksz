@@ -122,8 +122,12 @@ def show_many_corr(corr, radius_mpc=80., dosave=False):
     for i in range(3):
         pl.subplot(1,3,i+1)
         show_one_corr(corr[i], radius_mpc=radius_mpc, title=lambda_titles[i])
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    ax = pl.gca()
+    divider = make_axes_locatable(ax)
+    pl.colorbar(cax=divider.append_axes("right", size="4%", pad=0.05))
     if dosave:
-        savename = 'xi2d_3bin_%iMpc.pdf'%(radius_mpc)
+        savename = 'log10xi2d_3bin_%iMpc.pdf'%(radius_mpc)
         pl.savefig(savename)
 
 
