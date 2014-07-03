@@ -49,7 +49,8 @@ def corr_rm_rm():
         corr[i] = corr[i][:,1:]
         corr[i] = np.hstack([corr[i][:, ::-1], corr[i]])        
     return corr
-    
+
+
 def make_many_corr():
     hemi='south'
     dd = counts_2d_2pt(False, False, hemi, quick=False)
@@ -62,6 +63,7 @@ def make_many_corr():
     rd = counts_2d_2pt(True, False, hemi, quick=False)
     dr = counts_2d_2pt(False, True, hemi, quick=False)
     rr = counts_2d_2pt(True, True, hemi, quick=False)
+
     
 def make_corr_both_hemi():
     quick=True
@@ -95,6 +97,7 @@ def make_corr1d_fig(dosave=False):
     colors = ['blue','green','red']
     for i in range(3):
         corr1d, rcen = corr_1d_from_2d(corr[i])
+        ipdb.set_trace()
         pl.semilogx(rcen, corr1d*rcen**2, lw=lw, color=colors[i])
         #pl.semilogx(rcen, corr1d*rcen**2, 'o', lw=lw, color=colors[i])
     pl.xlabel(r'$s (Mpc)$',fontsize=fs)
